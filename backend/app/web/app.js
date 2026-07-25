@@ -59,6 +59,9 @@
   };
 
   restoreInterfaceSettings();
+  enableWheelNumberInput(thresholdInput, { decimals: 2 });
+  enableWheelNumberInput(visibleResultsInput, { decimals: 0 });
+  enableWheelNumberInput(visibleHeightInput, { decimals: 0 });
 
   calculateButton.addEventListener("click", () => {
     saveInterfaceSettings();
@@ -561,6 +564,38 @@
       );
     }
     chartXAxis.innerHTML = xParts.join("");
+  }
+
+  function enableWheelNumberInput(input, { decimals }) {
+    input.addEventListener(
+      "wheel",
+      (event) => {
+        // Колесо меняет значение только у активного поля и не прокручивает страницу.
+        if (document.activeElement !== input || event.deltaY === 0) {
+          return;
+        }
+
+        event.preventDefault();
+
+        const normalizedValue = String(input.value).trim().replace(",", ".");
+        const parsedValue = Number(normalizedValue);
+        const min = input.min === "" ? Number.NEGATIVE_INFINITY : Number(input.min);
+        const max = input.max === "" ? Number.POSITIVE_INFINITY : Number(input.max);
+        const fallbackValue = Number.isFinite(min) ? min : 0;
+        const currentValue = Number.isFinite(parsedValue) ? parsedValue : fallbackValue;
+        const direction = event.deltaY < 0 ? 1 : -1;
+        const nextValue = clamp(currentValue + direction * 1.0, min, max);
+
+        input.value = decimals > 0
+          ? normalizeFloatingPoint(nextValue).toFixed(decimals)
+          : String(Math.round(nextValue));
+
+        // Используем обычные события, чтобы сохранились настройки и обновился график.
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+      { passive: false }
+    );
   }
 
   function restoreInterfaceSettings() {
