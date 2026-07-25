@@ -13,6 +13,9 @@
   const chartViewport = document.getElementById("chart-viewport");
   const chartCanvas = document.getElementById("chart-canvas");
   const chart = document.getElementById("result-chart");
+  const chartYAxis = document.getElementById("chart-y-axis");
+  const chartXAxis = document.getElementById("chart-x-axis");
+  const chartAxisCorner = document.getElementById("chart-axis-corner");
   const chartEmpty = document.getElementById("chart-empty");
   const tooltip = document.getElementById("chart-tooltip");
   const errorBox = document.getElementById("error-box");
@@ -40,6 +43,7 @@
     dateStyle: "short",
     timeStyle: "medium"
   });
+  const SETTINGS_STORAGE_KEY = "aviator-analysis-interface-v1";
 
   let latestResponse = null;
   let activeController = null;
@@ -47,20 +51,38 @@
   let resizeTimer = null;
   let chartControlTimer = null;
   let chartHasRendered = false;
+  let currentAxisModel = null;
+  let axisRenderFrame = null;
   let lastChartOptions = {
     visibleResults: 100,
     visibleHeight: 50
   };
 
-  calculateButton.addEventListener("click", () => loadAnalysis());
+  restoreInterfaceSettings();
+
+  calculateButton.addEventListener("click", () => {
+    saveInterfaceSettings();
+    loadAnalysis();
+  });
   thresholdInput.addEventListener("keydown", handleCalculateOnEnter);
+  thresholdInput.addEventListener("input", saveInterfaceSettings);
   visibleResultsInput.addEventListener("keydown", handleChartControlOnEnter);
   visibleHeightInput.addEventListener("keydown", handleChartControlOnEnter);
-  visibleResultsInput.addEventListener("input", scheduleLocalChartRender);
-  visibleHeightInput.addEventListener("input", scheduleLocalChartRender);
-  autoRefresh.addEventListener("change", configureAutoRefresh);
+  visibleResultsInput.addEventListener("input", () => {
+    saveInterfaceSettings();
+    scheduleLocalChartRender();
+  });
+  visibleHeightInput.addEventListener("input", () => {
+    saveInterfaceSettings();
+    scheduleLocalChartRender();
+  });
+  autoRefresh.addEventListener("change", () => {
+    saveInterfaceSettings();
+    configureAutoRefresh();
+  });
   chartViewport.addEventListener("scroll", () => {
     tooltip.hidden = true;
+    scheduleStickyAxesRender();
   });
 
   window.addEventListener("resize", () => {
@@ -77,6 +99,7 @@
 
   function handleCalculateOnEnter(event) {
     if (event.key === "Enter") {
+      saveInterfaceSettings();
       loadAnalysis();
     }
   }
@@ -138,6 +161,7 @@
 
     thresholdInput.value = threshold.toFixed(2);
     normalizeChartInputs(chartOptions);
+    saveInterfaceSettings();
     activeController?.abort();
     activeController = new AbortController();
 
@@ -229,6 +253,12 @@
       chart.removeAttribute("width");
       chart.removeAttribute("height");
       chart.removeAttribute("viewBox");
+      currentAxisModel = null;
+      chartYAxis.innerHTML = "";
+      chartXAxis.innerHTML = "";
+      setElementHidden(chartYAxis, true);
+      setElementHidden(chartXAxis, true);
+      chartAxisCorner.hidden = true;
       chartHasRendered = false;
       return;
     }
@@ -284,28 +314,23 @@
     chart.setAttribute("height", String(height));
 
     const svgParts = [];
+    const yTicks = [];
     const yTickCount = Math.round((maxY - minY) / yTickStep);
     for (let tick = 0; tick <= yTickCount; tick += 1) {
       const value = normalizeFloatingPoint(maxY - tick * yTickStep);
       const y = yScale(value);
+      yTicks.push({ value, y });
       svgParts.push(
         `<line class="chart-grid-line" x1="${margin.left}" y1="${y}" ` +
         `x2="${width - margin.right}" y2="${y}"></line>`
-      );
-      svgParts.push(
-        `<text class="chart-axis-text" x="${margin.left - 9}" y="${y + 4}" ` +
-        `text-anchor="end">${escapeXml(formatCompact(value))}</text>`
       );
     }
 
     const xTickStep = calculateNiceIntegerStep(options.visibleResults / 5);
     const firstXTick = Math.ceil(minX / xTickStep) * xTickStep;
+    const xTicks = [];
     for (let value = firstXTick; value <= maxX; value += xTickStep) {
-      const x = xScale(value);
-      svgParts.push(
-        `<text class="chart-axis-text" x="${x}" y="${height - 17}" ` +
-        `text-anchor="middle">${escapeXml(formatCompact(value))}</text>`
-      );
+      xTicks.push({ value, x: xScale(value) });
     }
 
     if (minY <= 0 && maxY >= 0) {
@@ -332,6 +357,18 @@
     );
 
     chart.innerHTML = svgParts.join("");
+    currentAxisModel = {
+      margin,
+      viewportWidth,
+      viewportHeight,
+      yTicks,
+      xTicks
+    };
+    setElementHidden(chartYAxis, false);
+    setElementHidden(chartXAxis, false);
+    chartAxisCorner.hidden = false;
+    renderStickyAxes();
+
     attachChartInteraction({
       points,
       minX,
@@ -374,13 +411,13 @@
       const px = xScale(point.index);
       const py = yScale(point.balance);
 
-      hoverLine.hidden = false;
+      setElementHidden(hoverLine, false);
       hoverLine.setAttribute("x1", px);
       hoverLine.setAttribute("x2", px);
       hoverLine.setAttribute("y1", margin.top);
       hoverLine.setAttribute("y2", height - margin.bottom);
 
-      hoverDot.hidden = false;
+      setElementHidden(hoverDot, false);
       hoverDot.setAttribute("cx", px);
       hoverDot.setAttribute("cy", py);
 
@@ -408,8 +445,8 @@
     });
 
     overlay.addEventListener("pointerleave", () => {
-      hoverLine.hidden = true;
-      hoverDot.hidden = true;
+      setElementHidden(hoverLine, true);
+      setElementHidden(hoverDot, true);
       tooltip.hidden = true;
     });
   }
@@ -440,6 +477,7 @@
           0,
           maxTop
         );
+        scheduleStickyAxesRender();
         return;
       }
 
@@ -453,7 +491,117 @@
         0,
         maxTop
       );
+      scheduleStickyAxesRender();
     });
+  }
+
+  function scheduleStickyAxesRender() {
+    if (axisRenderFrame !== null) {
+      return;
+    }
+
+    axisRenderFrame = requestAnimationFrame(() => {
+      axisRenderFrame = null;
+      renderStickyAxes();
+    });
+  }
+
+  function renderStickyAxes() {
+    if (!currentAxisModel) {
+      return;
+    }
+
+    const { margin, yTicks, xTicks } = currentAxisModel;
+    const viewportWidth = chartViewport.clientWidth;
+    const viewportHeight = chartViewport.clientHeight;
+    const axisWidth = margin.left;
+    const axisHeight = margin.bottom;
+    const yAxisHeight = Math.max(viewportHeight - axisHeight, 1);
+    const xAxisWidth = Math.max(viewportWidth - axisWidth, 1);
+    const scrollbarHeight = Math.max(chartViewport.offsetHeight - chartViewport.clientHeight, 0);
+
+    chartYAxis.style.width = `${axisWidth}px`;
+    chartYAxis.style.height = `${yAxisHeight}px`;
+
+    chartXAxis.style.left = `${axisWidth}px`;
+    chartXAxis.style.bottom = `${scrollbarHeight}px`;
+    chartXAxis.style.width = `${xAxisWidth}px`;
+    chartXAxis.style.height = `${axisHeight}px`;
+
+    chartAxisCorner.style.bottom = `${scrollbarHeight}px`;
+    chartAxisCorner.style.width = `${axisWidth}px`;
+    chartAxisCorner.style.height = `${axisHeight}px`;
+
+    const yParts = [];
+    for (const tick of yTicks) {
+      const y = tick.y - chartViewport.scrollTop;
+      if (y < -12 || y > yAxisHeight + 12) {
+        continue;
+      }
+      yParts.push(
+        `<div class="chart-axis-mark chart-axis-mark-y" style="top:${y}px">` +
+        `<span>${escapeXml(formatCompact(tick.value))}</span>` +
+        `<i aria-hidden="true"></i>` +
+        `</div>`
+      );
+    }
+    chartYAxis.innerHTML = yParts.join("");
+
+    const xParts = [];
+    for (const tick of xTicks) {
+      const x = tick.x - chartViewport.scrollLeft - axisWidth;
+      if (x < -36 || x > xAxisWidth + 36) {
+        continue;
+      }
+      xParts.push(
+        `<div class="chart-axis-mark chart-axis-mark-x" style="left:${x}px">` +
+        `<i aria-hidden="true"></i>` +
+        `<span>${escapeXml(formatCompact(tick.value))}</span>` +
+        `</div>`
+      );
+    }
+    chartXAxis.innerHTML = xParts.join("");
+  }
+
+  function restoreInterfaceSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+
+      const settings = JSON.parse(raw);
+      if (typeof settings.threshold === "string") {
+        thresholdInput.value = settings.threshold;
+      }
+      if (typeof settings.visibleResults === "string") {
+        visibleResultsInput.value = settings.visibleResults;
+      }
+      if (typeof settings.visibleHeight === "string") {
+        visibleHeightInput.value = settings.visibleHeight;
+      }
+      if (typeof settings.autoRefresh === "boolean") {
+        autoRefresh.checked = settings.autoRefresh;
+      }
+    } catch (_error) {
+      // Повреждённые или недоступные локальные настройки не мешают работе страницы.
+    }
+  }
+
+  function saveInterfaceSettings() {
+    try {
+      localStorage.setItem(
+        SETTINGS_STORAGE_KEY,
+        JSON.stringify({
+          threshold: thresholdInput.value,
+          visibleResults: visibleResultsInput.value,
+          visibleHeight: visibleHeightInput.value,
+          autoRefresh: autoRefresh.checked
+        })
+      );
+    } catch (_error) {
+      // В приватном режиме localStorage может быть недоступен.
+    }
   }
 
   function readChartOptions() {
@@ -479,6 +627,7 @@
     lastChartOptions = { ...options };
     visibleResultsInput.value = String(options.visibleResults);
     visibleHeightInput.value = String(options.visibleHeight);
+    saveInterfaceSettings();
   }
 
   function findNearestPoint(points, targetIndex) {
@@ -552,6 +701,10 @@
 
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
+  }
+
+  function setElementHidden(element, hidden) {
+    element.toggleAttribute("hidden", hidden);
   }
 
   function setConnection(isOnline) {

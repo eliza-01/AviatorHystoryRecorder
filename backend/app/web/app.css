@@ -383,10 +383,6 @@ button:disabled {
   stroke-linecap: round;
 }
 
-.chart-axis-text {
-  fill: var(--muted);
-  font-size: 12px;
-}
 
 .chart-hover-line {
   stroke: rgba(243, 245, 247, 0.4);
@@ -484,4 +480,90 @@ button:disabled {
   .comparison-separator {
     display: none;
   }
+}
+
+.chart-axis-overlay {
+  position: absolute;
+  z-index: 10;
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.chart-y-axis {
+  top: 0;
+  left: 0;
+  border-right: 1px solid var(--border);
+}
+
+.chart-x-axis {
+  border-top: 1px solid var(--border);
+}
+
+.chart-axis-mark {
+  position: absolute;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.chart-axis-mark-y {
+  right: 0;
+  width: 100%;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-left: 4px;
+  transform: translateY(-50%);
+}
+
+.chart-axis-mark-y span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chart-axis-mark-y i {
+  flex: 0 0 7px;
+  width: 7px;
+  border-top: 1px solid var(--muted);
+}
+
+.chart-axis-mark-x {
+  top: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: 7px auto;
+  justify-items: center;
+  gap: 5px;
+  transform: translateX(-50%);
+}
+
+.chart-axis-mark-x i {
+  height: 7px;
+  border-left: 1px solid var(--muted);
+}
+
+.chart-axis-mark-x span {
+  display: block;
+  padding: 0 3px;
+}
+
+.chart-axis-corner {
+  position: absolute;
+  z-index: 11;
+  left: 0;
+  pointer-events: none;
+  background: var(--panel-soft);
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+.chart-axis-overlay[hidden],
+.chart-axis-corner[hidden] {
+  display: none;
 }

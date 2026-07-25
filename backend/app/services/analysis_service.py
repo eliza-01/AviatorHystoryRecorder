@@ -44,8 +44,8 @@ class AnalysisService:
         weighted_positive = Decimal(positive) * win_delta
 
         # Формула пользователя, отдельная от результата графика:
-        # положительные - отрицательные * (x - 1).
-        requested_result = Decimal(positive) - Decimal(negative) * win_delta
+        # положительные * (x - 1) - отрицательные.
+        requested_result = Decimal(positive) * win_delta - Decimal(negative)
 
         stats = AnalysisStats(
             x=float(threshold),
