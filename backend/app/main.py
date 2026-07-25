@@ -1,7 +1,10 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.core.config import get_settings
@@ -20,10 +23,11 @@ async def lifespan(_: FastAPI):
 
 
 settings = get_settings()
+web_directory = Path(__file__).resolve().parent / "web"
 
 app = FastAPI(
     title=settings.app_name,
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -35,4 +39,14 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
+app.mount(
+    "/assets",
+    StaticFiles(directory=web_directory),
+    name="web-assets",
+)
 app.include_router(api_router, prefix=settings.api_prefix)
+
+
+@app.get("/", include_in_schema=False)
+async def get_dashboard() -> FileResponse:
+    return FileResponse(web_directory / "index.html")

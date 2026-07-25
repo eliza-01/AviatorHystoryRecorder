@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aviator — анализ результатов</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Aviator History Recorder</p>
+        <h1>Анализ результатов</h1>
+        <p class="subtitle">
+          Для каждого раунда: если multiplier &gt; x, баланс увеличивается на x − 1;
+          иначе уменьшается на 1.
+        </p>
+      </div>
+      <div class="connection-status" id="connection-status" aria-live="polite">
+        Загрузка…
+      </div>
+    </header>
+
+    <section class="controls-panel" aria-label="Параметры анализа">
+      <label class="field" for="threshold-input">
+        <span>Значение x</span>
+        <input
+          id="threshold-input"
+          type="number"
+          min="1"
+          max="1000000"
+          step="0.01"
+          value="2.00"
+          inputmode="decimal"
+        >
+      </label>
+      <button id="calculate-button" type="button">Рассчитать</button>
+      <label class="auto-refresh">
+        <input id="auto-refresh" type="checkbox" checked>
+        <span>Обновлять каждые 5 секунд</span>
+      </label>
+      <div class="last-update" id="last-update">Последнее обновление: —</div>
+    </section>
+
+    <section class="chart-section" aria-labelledby="chart-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="chart-title">Накопительный результат</h2>
+          <p id="chart-caption">Ожидание данных…</p>
+        </div>
+        <div class="chart-legend">
+          <span><i class="legend-line"></i> Баланс</span>
+          <span><i class="legend-zero"></i> Нулевая линия</span>
+        </div>
+      </div>
+      <div class="chart-wrap" id="chart-wrap">
+        <svg id="result-chart" role="img" aria-label="График накопительного результата"></svg>
+        <div class="chart-empty" id="chart-empty">В базе пока нет результатов</div>
+        <div class="chart-tooltip" id="chart-tooltip" hidden></div>
+      </div>
+    </section>
+
+    <section class="stats-section" aria-labelledby="stats-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="stats-title">Статистика</h2>
+          <p>Положительный результат: multiplier &gt; x. Отрицательный: multiplier ≤ x.</p>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <article class="stat-card">
+          <span class="stat-label">Всего результатов</span>
+          <strong class="stat-value" id="stat-total">0</strong>
+        </article>
+        <article class="stat-card positive-card">
+          <span class="stat-label">Положительных</span>
+          <strong class="stat-value" id="stat-positive">0</strong>
+          <span class="stat-detail" id="stat-positive-rate">0%</span>
+        </article>
+        <article class="stat-card negative-card">
+          <span class="stat-label">Отрицательных</span>
+          <strong class="stat-value" id="stat-negative">0</strong>
+          <span class="stat-detail" id="stat-negative-rate">0%</span>
+        </article>
+        <article class="stat-card comparison-card">
+          <span class="stat-label">Сопоставление</span>
+          <div class="comparison-values">
+            <div class="comparison-part">
+              <span class="stat-detail">Отрицательные</span>
+              <strong class="comparison-value value-negative" id="stat-comparison-negative">0</strong>
+            </div>
+            <span class="comparison-separator" aria-hidden="true">|</span>
+            <div class="comparison-part">
+              <span class="stat-detail">Положительные × (x − 1)</span>
+              <strong class="comparison-value value-positive" id="stat-comparison-positive">0</strong>
+            </div>
+          </div>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">Результат по указанной формуле</span>
+          <strong class="stat-value" id="stat-requested-result">0</strong>
+          <span class="stat-detail">положительные − отрицательные × (x − 1)</span>
+        </article>
+        <article class="stat-card result-card" id="chart-result-card">
+          <span class="stat-label">Итог графика</span>
+          <strong class="stat-value" id="stat-chart-result">0</strong>
+          <span class="stat-detail">положительные × (x − 1) − отрицательные</span>
+        </article>
+      </div>
+    </section>
+
+    <div class="error-box" id="error-box" role="alert" hidden></div>
+  </main>
+
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
