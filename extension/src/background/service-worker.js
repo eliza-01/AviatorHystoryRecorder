@@ -90,10 +90,16 @@ async function handleMessage(message, sender) {
 async function getCaptureState(sender, message) {
   const settings = await getSettings();
   const topUrl = sender.tab?.url || message.pageUrl || "";
+  const aviatorTab = isAviatorTabUrl(topUrl);
+
   return {
     ok: true,
-    enabled: Boolean(settings.enabled && isAviatorTabUrl(topUrl)),
-    diagnosticsEnabled: Boolean(settings.diagnosticsEnabled)
+    enabled: Boolean(settings.enabled && aviatorTab),
+    diagnosticsEnabled: Boolean(settings.diagnosticsEnabled),
+    pageAutoReloadEnabled: Boolean(
+      settings.pageAutoReloadEnabled && aviatorTab
+    ),
+    pageAutoReloadSeconds: Number(settings.pageAutoReloadSeconds)
   };
 }
 

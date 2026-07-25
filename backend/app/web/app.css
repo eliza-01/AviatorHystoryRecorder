@@ -105,10 +105,8 @@ h2 {
 }
 
 .controls-panel {
-  display: flex;
-  align-items: end;
-  gap: 14px;
-  flex-wrap: wrap;
+  display: grid;
+  gap: 16px;
   margin-bottom: 24px;
   padding: 18px;
   border: 1px solid var(--border);
@@ -116,16 +114,25 @@ h2 {
   background: var(--panel);
 }
 
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(170px, 1fr)) minmax(310px, auto);
+  align-items: end;
+  gap: 14px;
+}
+
 .field {
   display: grid;
+  grid-template-rows: auto 44px minmax(30px, auto);
   gap: 7px;
-  min-width: 190px;
+  min-width: 0;
   color: var(--muted);
   font-size: 14px;
 }
 
 .field input {
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel-soft);
@@ -140,10 +147,33 @@ h2 {
 }
 
 .field small {
-  max-width: 220px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.3;
+}
+
+.controls-actions {
+  display: grid;
+  grid-template-columns: auto minmax(210px, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 37px;
+}
+
+.controls-actions button {
+  white-space: nowrap;
+}
+
+.controls-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 24px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
 }
 
 button {
@@ -169,24 +199,28 @@ button:disabled {
 .auto-refresh {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   min-height: 43px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .auto-refresh input {
+  flex: 0 0 auto;
   width: 17px;
   height: 17px;
   accent-color: var(--accent);
 }
 
 .last-update {
-  margin-left: auto;
-  min-height: 43px;
-  display: flex;
-  align-items: center;
-  font-size: 13px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
 }
 
 .chart-section,
@@ -396,15 +430,21 @@ button:disabled {
   stroke-width: 2;
 }
 
+@media (max-width: 980px) {
+  .controls-grid {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+
+  .controls-actions {
+    grid-column: 1 / -1;
+    justify-content: start;
+    padding-bottom: 0;
+  }
+}
+
 @media (max-width: 900px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .last-update {
-    width: 100%;
-    margin-left: 0;
-    min-height: auto;
   }
 }
 
@@ -423,8 +463,31 @@ button:disabled {
     justify-self: start;
   }
 
-  .controls-panel {
-    align-items: stretch;
+  .controls-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .controls-actions {
+    grid-column: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .controls-actions button,
+  .auto-refresh {
+    width: 100%;
+  }
+
+  .auto-refresh {
+    justify-content: center;
+    white-space: normal;
+  }
+
+  .controls-footer {
+    display: grid;
+  }
+
+  .last-update {
+    text-align: left;
   }
 
   .field,

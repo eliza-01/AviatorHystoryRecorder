@@ -23,6 +23,27 @@
       <input id="apiBaseUrl" type="url" autocomplete="off" spellcheck="false">
     </label>
 
+    <section class="reload-card" aria-labelledby="reload-title">
+      <label class="switch-row reload-switch">
+        <span id="reload-title">Автообновление страницы</span>
+        <input id="pageAutoReloadEnabled" type="checkbox">
+      </label>
+      <label class="field reload-interval-field">
+        <span>Перезагружать каждые, секунд</span>
+        <input
+          id="pageAutoReloadSeconds"
+          type="number"
+          min="5"
+          max="86400"
+          step="1"
+          value="60"
+          inputmode="numeric"
+          disabled
+        >
+        <small>Работает только для вкладки Aviator. Минимум 5 секунд.</small>
+      </label>
+    </section>
+
     <div class="buttons">
       <button id="save" type="button">Сохранить</button>
       <button id="test" type="button" class="secondary">Проверить API</button>

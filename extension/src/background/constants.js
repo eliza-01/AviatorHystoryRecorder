@@ -1,7 +1,9 @@
 export const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
   diagnosticsEnabled: false,
-  apiBaseUrl: "http://localhost:8010"
+  apiBaseUrl: "http://localhost:8010",
+  pageAutoReloadEnabled: false,
+  pageAutoReloadSeconds: 60
 });
 
 export const STORAGE_KEYS = Object.freeze({

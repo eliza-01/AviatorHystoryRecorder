@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Aviator History Recorder",
-  "version": "1.3.2",
-  "description": "Сохраняет завершённые результаты Aviator в локальный Python/MySQL API без API-ключа.",
+  "version": "1.4.0",
+  "description": "Сохраняет завершённые результаты Aviator в локальный Python/MySQL API и умеет автоматически перезагружать вкладку игры.",
   "permissions": [
     "storage",
     "alarms"

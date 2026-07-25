@@ -2,6 +2,8 @@ const elements = {
   version: document.querySelector("#version"),
   enabled: document.querySelector("#enabled"),
   apiBaseUrl: document.querySelector("#apiBaseUrl"),
+  pageAutoReloadEnabled: document.querySelector("#pageAutoReloadEnabled"),
+  pageAutoReloadSeconds: document.querySelector("#pageAutoReloadSeconds"),
   save: document.querySelector("#save"),
   test: document.querySelector("#test"),
   flush: document.querySelector("#flush"),
@@ -40,7 +42,9 @@ let settingsDirty = false;
 
 const settingsElements = [
   elements.enabled,
-  elements.apiBaseUrl
+  elements.apiBaseUrl,
+  elements.pageAutoReloadEnabled,
+  elements.pageAutoReloadSeconds
 ];
 
 for (const element of settingsElements) {
@@ -48,6 +52,7 @@ for (const element of settingsElements) {
   element.addEventListener("change", markSettingsDirty);
 }
 
+elements.pageAutoReloadEnabled.addEventListener("change", syncReloadFields);
 elements.save.addEventListener("click", save);
 elements.test.addEventListener("click", testConnection);
 elements.flush.addEventListener("click", flush);
@@ -84,6 +89,13 @@ function render(response) {
   if (!settingsDirty && !isEditingSettings()) {
     elements.enabled.checked = Boolean(settings.enabled);
     elements.apiBaseUrl.value = settings.apiBaseUrl || "";
+    elements.pageAutoReloadEnabled.checked = Boolean(
+      settings.pageAutoReloadEnabled
+    );
+    elements.pageAutoReloadSeconds.value = String(
+      settings.pageAutoReloadSeconds || 60
+    );
+    syncReloadFields();
   }
   elements.resultQueueSize.textContent = String(queues.resultQueueSize || 0);
   elements.sampleQueueSize.textContent = String(queues.sampleQueueSize || 0);
@@ -102,11 +114,24 @@ function render(response) {
 
 async function save() {
   setStatus("Сохранение…");
+  const reloadSeconds = normalizeReloadSeconds(
+    elements.pageAutoReloadSeconds.value
+  );
+
+  if (reloadSeconds === null) {
+    setStatus("Интервал обновления должен быть от 5 до 86400 секунд", true);
+    elements.pageAutoReloadSeconds.focus();
+    return false;
+  }
+
+  elements.pageAutoReloadSeconds.value = String(reloadSeconds);
   const response = await chrome.runtime.sendMessage({
     type: "SAVE_SETTINGS",
     settings: {
       enabled: elements.enabled.checked,
-      apiBaseUrl: elements.apiBaseUrl.value
+      apiBaseUrl: elements.apiBaseUrl.value,
+      pageAutoReloadEnabled: elements.pageAutoReloadEnabled.checked,
+      pageAutoReloadSeconds: reloadSeconds
     }
   });
 
@@ -177,6 +202,19 @@ function setStatus(message, error = false, ok = false) {
   elements.status.textContent = message;
   elements.status.classList.toggle("error", error);
   elements.status.classList.toggle("ok", ok);
+}
+
+function syncReloadFields() {
+  elements.pageAutoReloadSeconds.disabled =
+    !elements.pageAutoReloadEnabled.checked;
+}
+
+function normalizeReloadSeconds(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 5 || parsed > 86400) {
+    return null;
+  }
+  return Math.round(parsed);
 }
 
 function markSettingsDirty() {

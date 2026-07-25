@@ -9,6 +9,8 @@
   const MAX_HISTORY_ITEMS = 100;
   const MIN_RELIABLE_OVERLAP = 4;
   const STATUS_INTERVAL_MS = 3000;
+  const MIN_AUTO_RELOAD_SECONDS = 5;
+  const MAX_AUTO_RELOAD_SECONDS = 86_400;
 
   let persistedState = null;
   let persistedStateLoaded = false;
@@ -19,10 +21,14 @@
   let lastStatusSignature = null;
   let lastStatusSentAt = 0;
   let scannerStarted = false;
+  let pageAutoReloadTimer = null;
+  let topPageReady = document.readyState === "complete";
 
   start();
 
   function start() {
+    startPageAutoReloadController();
+
     reportStatus({
       stage: "injected",
       historyFound: false,
@@ -34,6 +40,70 @@
     } else {
       startScanner();
     }
+  }
+
+  function startPageAutoReloadController() {
+    if (window.top !== window) {
+      return;
+    }
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local" || !changes.settings || !topPageReady) {
+        return;
+      }
+      void configurePageAutoReload();
+    });
+
+    if (topPageReady) {
+      void configurePageAutoReload();
+      return;
+    }
+
+    window.addEventListener(
+      "load",
+      () => {
+        topPageReady = true;
+        void configurePageAutoReload();
+      },
+      { once: true }
+    );
+  }
+
+  async function configurePageAutoReload() {
+    clearTimeout(pageAutoReloadTimer);
+    pageAutoReloadTimer = null;
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "GET_CAPTURE_STATE",
+        pageUrl: location.href
+      });
+
+      if (!response?.ok || !response.pageAutoReloadEnabled) {
+        return;
+      }
+
+      const seconds = clampInteger(
+        response.pageAutoReloadSeconds,
+        MIN_AUTO_RELOAD_SECONDS,
+        MAX_AUTO_RELOAD_SECONDS,
+        60
+      );
+
+      pageAutoReloadTimer = setTimeout(() => {
+        location.reload();
+      }, seconds * 1000);
+    } catch {
+      // После перезагрузки расширения старый content script теряет контекст.
+    }
+  }
+
+  function clampInteger(value, minimum, maximum, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+    return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
   }
 
   function startScanner() {
