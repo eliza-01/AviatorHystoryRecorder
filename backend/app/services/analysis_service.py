@@ -11,14 +11,13 @@ class AnalysisService:
     async def calculate(
         self,
         threshold: Decimal,
-        max_points: int,
     ) -> AnalysisResponse:
         rows = await self._repository.list_for_analysis()
         win_delta = threshold - Decimal("1")
         balance = Decimal("0")
         positive = 0
         negative = 0
-        all_points: list[AnalysisPoint] = []
+        points: list[AnalysisPoint] = []
 
         for index, (_, multiplier, occurred_at) in enumerate(rows, start=1):
             if multiplier > threshold:
@@ -29,7 +28,7 @@ class AnalysisService:
                 delta = Decimal("-1")
 
             balance += delta
-            all_points.append(
+            points.append(
                 AnalysisPoint(
                     index=index,
                     multiplier=float(multiplier),
@@ -42,14 +41,12 @@ class AnalysisService:
         total = positive + negative
         positive_rate = (positive / total * 100) if total else 0.0
         negative_rate = (negative / total * 100) if total else 0.0
-
         weighted_positive = Decimal(positive) * win_delta
 
         # Формула пользователя, отдельная от результата графика:
         # положительные - отрицательные * (x - 1).
         requested_result = Decimal(positive) - Decimal(negative) * win_delta
 
-        sampled_points = self._sample_points(all_points, max_points=max_points)
         stats = AnalysisStats(
             x=float(threshold),
             total=total,
@@ -60,24 +57,6 @@ class AnalysisService:
             weighted_positive=float(weighted_positive),
             requested_result=float(requested_result),
             chart_result=float(balance),
-            points_returned=len(sampled_points),
+            points_returned=len(points),
         )
-        return AnalysisResponse(stats=stats, points=sampled_points)
-
-    @staticmethod
-    def _sample_points(
-        points: list[AnalysisPoint],
-        max_points: int,
-    ) -> list[AnalysisPoint]:
-        if len(points) <= max_points:
-            return points
-
-        last_index = len(points) - 1
-        step = last_index / (max_points - 1)
-        selected_indexes = {
-            min(round(position * step), last_index)
-            for position in range(max_points)
-        }
-        selected_indexes.add(0)
-        selected_indexes.add(last_index)
-        return [points[index] for index in sorted(selected_indexes)]
+        return AnalysisResponse(stats=stats, points=points)

@@ -35,6 +35,35 @@
           inputmode="decimal"
         >
       </label>
+
+      <label class="field" for="visible-results-input">
+        <span>Вмещать на графике</span>
+        <input
+          id="visible-results-input"
+          type="number"
+          min="2"
+          max="10000"
+          step="1"
+          value="100"
+          inputmode="numeric"
+        >
+        <small>Количество результатов по горизонтали</small>
+      </label>
+
+      <label class="field" for="visible-height-input">
+        <span>Высота графика</span>
+        <input
+          id="visible-height-input"
+          type="number"
+          min="1"
+          max="1000000"
+          step="1"
+          value="50"
+          inputmode="numeric"
+        >
+        <small>Количество пунктов баланса по вертикали</small>
+      </label>
+
       <button id="calculate-button" type="button">Рассчитать</button>
       <label class="auto-refresh">
         <input id="auto-refresh" type="checkbox" checked>
@@ -55,8 +84,12 @@
         </div>
       </div>
       <div class="chart-wrap" id="chart-wrap">
-        <svg id="result-chart" role="img" aria-label="График накопительного результата"></svg>
-        <div class="chart-empty" id="chart-empty">В базе пока нет результатов</div>
+        <div class="chart-viewport" id="chart-viewport">
+          <div class="chart-canvas" id="chart-canvas">
+            <svg id="result-chart" role="img" aria-label="График накопительного результата"></svg>
+          </div>
+        </div>
+        <div class="chart-empty" id="chart-empty" hidden>В базе пока нет результатов</div>
         <div class="chart-tooltip" id="chart-tooltip" hidden></div>
       </div>
     </section>

@@ -1,13 +1,17 @@
 (() => {
   "use strict";
 
-  const input = document.getElementById("threshold-input");
+  const thresholdInput = document.getElementById("threshold-input");
+  const visibleResultsInput = document.getElementById("visible-results-input");
+  const visibleHeightInput = document.getElementById("visible-height-input");
   const calculateButton = document.getElementById("calculate-button");
   const autoRefresh = document.getElementById("auto-refresh");
   const connectionStatus = document.getElementById("connection-status");
   const lastUpdate = document.getElementById("last-update");
   const chartCaption = document.getElementById("chart-caption");
   const chartWrap = document.getElementById("chart-wrap");
+  const chartViewport = document.getElementById("chart-viewport");
+  const chartCanvas = document.getElementById("chart-canvas");
   const chart = document.getElementById("result-chart");
   const chartEmpty = document.getElementById("chart-empty");
   const tooltip = document.getElementById("chart-tooltip");
@@ -22,8 +26,7 @@
     comparisonNegative: document.getElementById("stat-comparison-negative"),
     comparisonPositive: document.getElementById("stat-comparison-positive"),
     requestedResult: document.getElementById("stat-requested-result"),
-    chartResult: document.getElementById("stat-chart-result"),
-    chartResultCard: document.getElementById("chart-result-card")
+    chartResult: document.getElementById("stat-chart-result")
   };
 
   const numberFormatter = new Intl.NumberFormat("ru-RU", {
@@ -42,25 +45,73 @@
   let activeController = null;
   let autoRefreshTimer = null;
   let resizeTimer = null;
+  let chartControlTimer = null;
+  let chartHasRendered = false;
+  let lastChartOptions = {
+    visibleResults: 100,
+    visibleHeight: 50
+  };
 
   calculateButton.addEventListener("click", () => loadAnalysis());
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      loadAnalysis();
-    }
-  });
+  thresholdInput.addEventListener("keydown", handleCalculateOnEnter);
+  visibleResultsInput.addEventListener("keydown", handleChartControlOnEnter);
+  visibleHeightInput.addEventListener("keydown", handleChartControlOnEnter);
+  visibleResultsInput.addEventListener("input", scheduleLocalChartRender);
+  visibleHeightInput.addEventListener("input", scheduleLocalChartRender);
   autoRefresh.addEventListener("change", configureAutoRefresh);
+  chartViewport.addEventListener("scroll", () => {
+    tooltip.hidden = true;
+  });
+
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       if (latestResponse) {
-        renderChart(latestResponse.points);
+        renderChart(latestResponse.points, { preserveScroll: true });
       }
     }, 120);
   });
 
   configureAutoRefresh();
   loadAnalysis();
+
+  function handleCalculateOnEnter(event) {
+    if (event.key === "Enter") {
+      loadAnalysis();
+    }
+  }
+
+  function handleChartControlOnEnter(event) {
+    if (event.key === "Enter") {
+      renderCurrentChart({ preserveScroll: false });
+    }
+  }
+
+  function scheduleLocalChartRender() {
+    clearTimeout(chartControlTimer);
+    chartControlTimer = setTimeout(() => {
+      renderCurrentChart({ preserveScroll: false, quietValidation: true });
+    }, 250);
+  }
+
+  function renderCurrentChart({ preserveScroll, quietValidation = false }) {
+    if (!latestResponse) {
+      return;
+    }
+
+    const options = readChartOptions();
+    if (!options) {
+      if (!quietValidation) {
+        showError("Проверьте параметры размеров графика.");
+      }
+      return;
+    }
+
+    hideError();
+    normalizeChartInputs(options);
+    renderChart(latestResponse.points, { preserveScroll });
+    updateChartCaption(latestResponse.stats, options);
+  }
 
   function configureAutoRefresh() {
     clearInterval(autoRefreshTimer);
@@ -72,14 +123,21 @@
   }
 
   async function loadAnalysis({ quiet = false } = {}) {
-    const threshold = parseThreshold(input.value);
+    const threshold = parseThreshold(thresholdInput.value);
+    const chartOptions = readChartOptions();
+
     if (threshold === null) {
       showError("Введите корректное значение x: число не меньше 1.");
-      input.focus();
+      thresholdInput.focus();
+      return;
+    }
+    if (!chartOptions) {
+      showError("Количество результатов должно быть не меньше 2, высота — не меньше 1.");
       return;
     }
 
-    input.value = threshold.toFixed(2);
+    thresholdInput.value = threshold.toFixed(2);
+    normalizeChartInputs(chartOptions);
     activeController?.abort();
     activeController = new AbortController();
 
@@ -90,10 +148,7 @@
     hideError();
 
     try {
-      const query = new URLSearchParams({
-        x: String(threshold),
-        max_points: "5000"
-      });
+      const query = new URLSearchParams({ x: String(threshold) });
       const response = await fetch(`/api/v1/analysis?${query}`, {
         signal: activeController.signal,
         cache: "no-store"
@@ -104,7 +159,7 @@
       }
 
       latestResponse = await response.json();
-      render(latestResponse);
+      render(latestResponse, { preserveScroll: quiet && chartHasRendered });
       setConnection(true);
       lastUpdate.textContent = `Последнее обновление: ${dateFormatter.format(new Date())}`;
     } catch (error) {
@@ -121,19 +176,23 @@
     }
   }
 
-  function render(data) {
+  function render(data, { preserveScroll }) {
+    const options = readChartOptions() || lastChartOptions;
     renderStats(data.stats);
-    renderChart(data.points);
+    renderChart(data.points, { preserveScroll });
+    updateChartCaption(data.stats, options);
+  }
 
-    if (data.stats.total === 0) {
+  function updateChartCaption(stats, options) {
+    if (stats.total === 0) {
       chartCaption.textContent = "В базе пока нет результатов.";
-    } else if (data.stats.points_returned < data.stats.total) {
-      chartCaption.textContent =
-        `Показано ${formatNumber(data.stats.points_returned)} из ` +
-        `${formatNumber(data.stats.total)} точек. Статистика рассчитана по всем результатам.`;
-    } else {
-      chartCaption.textContent = `Показаны все ${formatNumber(data.stats.total)} результатов.`;
+      return;
     }
+
+    chartCaption.textContent =
+      `Показаны все ${formatNumber(stats.total)} результатов. ` +
+      `В окне: ${formatNumber(options.visibleResults)} результатов × ` +
+      `${formatNumber(options.visibleHeight)} пунктов; остальное доступно прокруткой.`;
   }
 
   function renderStats(stats) {
@@ -147,69 +206,87 @@
     fields.requestedResult.textContent = formatSigned(stats.requested_result);
     fields.chartResult.textContent = formatSigned(stats.chart_result);
 
-    fields.requestedResult.classList.toggle(
-      "value-positive",
-      stats.requested_result > 0
-    );
-    fields.requestedResult.classList.toggle(
-      "value-negative",
-      stats.requested_result < 0
-    );
-    fields.chartResult.classList.toggle("value-positive", stats.chart_result > 0);
-    fields.chartResult.classList.toggle("value-negative", stats.chart_result < 0);
+    toggleSignedClass(fields.requestedResult, stats.requested_result);
+    toggleSignedClass(fields.chartResult, stats.chart_result);
   }
 
-  function renderChart(points) {
+  function toggleSignedClass(element, value) {
+    element.classList.toggle("value-positive", Number(value) > 0);
+    element.classList.toggle("value-negative", Number(value) < 0);
+  }
+
+  function renderChart(points, { preserveScroll = false } = {}) {
+    const options = readChartOptions() || lastChartOptions;
+
+    const previousScroll = captureScrollState();
     tooltip.hidden = true;
     chart.innerHTML = "";
 
     if (!Array.isArray(points) || points.length === 0) {
       chartEmpty.hidden = false;
+      chartCanvas.style.width = "100%";
+      chartCanvas.style.height = "100%";
+      chart.removeAttribute("width");
+      chart.removeAttribute("height");
+      chart.removeAttribute("viewBox");
+      chartHasRendered = false;
       return;
     }
     chartEmpty.hidden = true;
 
-    const width = Math.max(chartWrap.clientWidth, 320);
-    const height = window.innerWidth <= 640 ? 340 : 430;
+    const viewportWidth = Math.max(chartViewport.clientWidth, 320);
+    const viewportHeight = Math.max(chartViewport.clientHeight, window.innerWidth <= 640 ? 340 : 430);
     const margin = {
       top: 22,
       right: 22,
       bottom: 48,
-      left: width < 520 ? 52 : 68
+      left: viewportWidth < 520 ? 52 : 68
     };
-    const plotWidth = Math.max(width - margin.left - margin.right, 1);
-    const plotHeight = Math.max(height - margin.top - margin.bottom, 1);
+    const viewportPlotWidth = Math.max(viewportWidth - margin.left - margin.right, 1);
+    const viewportPlotHeight = Math.max(viewportHeight - margin.top - margin.bottom, 1);
+
+    const horizontalFactor = points.length <= options.visibleResults
+      ? 1
+      : (points.length - 1) / Math.max(options.visibleResults - 1, 1);
+    const plotWidth = Math.max(viewportPlotWidth * horizontalFactor, viewportPlotWidth);
+    const width = margin.left + plotWidth + margin.right;
 
     const balances = points.map((point) => Number(point.balance));
     const dataMinY = Math.min(0, ...balances);
     const dataMaxY = Math.max(0, ...balances);
-    const rawRange = Math.max(dataMaxY - dataMinY, 1);
-    const tickStep = calculateNiceStep(rawRange / 5);
-    let minY = Math.floor(dataMinY / tickStep) * tickStep;
-    let maxY = Math.ceil(dataMaxY / tickStep) * tickStep;
+    const yTickStep = calculateNiceStep(options.visibleHeight / 5);
+    let minY = Math.floor(dataMinY / yTickStep) * yTickStep;
+    let maxY = Math.ceil(dataMaxY / yTickStep) * yTickStep;
+
     if (minY === maxY) {
-      minY -= tickStep;
-      maxY += tickStep;
+      minY -= yTickStep;
+      maxY += yTickStep;
     }
+
+    const yRange = Math.max(maxY - minY, yTickStep);
+    const verticalFactor = Math.max(1, yRange / options.visibleHeight);
+    const plotHeight = Math.max(viewportPlotHeight * verticalFactor, viewportPlotHeight);
+    const height = margin.top + plotHeight + margin.bottom;
 
     const minX = Number(points[0].index);
     const maxX = Number(points[points.length - 1].index);
     const xRange = Math.max(maxX - minX, 1);
-    const yRange = Math.max(maxY - minY, 1);
 
     const xScale = (value) =>
       margin.left + ((Number(value) - minX) / xRange) * plotWidth;
     const yScale = (value) =>
       margin.top + ((maxY - Number(value)) / yRange) * plotHeight;
 
+    chartCanvas.style.width = `${width}px`;
+    chartCanvas.style.height = `${height}px`;
     chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
     chart.setAttribute("width", String(width));
     chart.setAttribute("height", String(height));
 
     const svgParts = [];
-    const yTickCount = Math.round((maxY - minY) / tickStep);
+    const yTickCount = Math.round((maxY - minY) / yTickStep);
     for (let tick = 0; tick <= yTickCount; tick += 1) {
-      const value = normalizeFloatingPoint(maxY - tick * tickStep);
+      const value = normalizeFloatingPoint(maxY - tick * yTickStep);
       const y = yScale(value);
       svgParts.push(
         `<line class="chart-grid-line" x1="${margin.left}" y1="${y}" ` +
@@ -221,10 +298,9 @@
       );
     }
 
-    const xTicks = Math.min(6, points.length);
-    for (let tick = 0; tick < xTicks; tick += 1) {
-      const ratio = xTicks === 1 ? 0 : tick / (xTicks - 1);
-      const value = Math.round(minX + ratio * xRange);
+    const xTickStep = calculateNiceIntegerStep(options.visibleResults / 5);
+    const firstXTick = Math.ceil(minX / xTickStep) * xTickStep;
+    for (let value = firstXTick; value <= maxX; value += xTickStep) {
       const x = xScale(value);
       svgParts.push(
         `<text class="chart-axis-text" x="${x}" y="${height - 17}" ` +
@@ -256,14 +332,43 @@
     );
 
     chart.innerHTML = svgParts.join("");
+    attachChartInteraction({
+      points,
+      minX,
+      xRange,
+      plotWidth,
+      height,
+      margin,
+      xScale,
+      yScale
+    });
 
+    const latestPointY = yScale(points[points.length - 1].balance);
+    restoreScrollState({
+      previousScroll,
+      preserveScroll,
+      latestPointY
+    });
+    chartHasRendered = true;
+  }
+
+  function attachChartInteraction({
+    points,
+    minX,
+    xRange,
+    plotWidth,
+    height,
+    margin,
+    xScale,
+    yScale
+  }) {
     const overlay = chart.querySelector("#chart-overlay");
     const hoverLine = chart.querySelector("#hover-line");
     const hoverDot = chart.querySelector("#hover-dot");
 
     overlay.addEventListener("pointermove", (event) => {
-      const rect = chart.getBoundingClientRect();
-      const localX = ((event.clientX - rect.left) / rect.width) * width;
+      const svgRect = chart.getBoundingClientRect();
+      const localX = event.clientX - svgRect.left;
       const targetIndex = minX + ((localX - margin.left) / plotWidth) * xRange;
       const point = findNearestPoint(points, targetIndex);
       const px = xScale(point.index);
@@ -287,14 +392,17 @@
         `Баланс: ${formatSigned(point.balance)}<br>` +
         `${escapeXml(formatDate(point.occurred_at))}`;
 
+      const viewportRect = chartViewport.getBoundingClientRect();
       const tooltipWidth = tooltip.offsetWidth || 190;
       const tooltipHeight = tooltip.offsetHeight || 110;
-      let left = (px / width) * rect.width + 12;
-      let top = (py / height) * rect.height - tooltipHeight / 2;
-      if (left + tooltipWidth > rect.width - 8) {
-        left = (px / width) * rect.width - tooltipWidth - 12;
+      let left = event.clientX - viewportRect.left + 12;
+      let top = event.clientY - viewportRect.top - tooltipHeight / 2;
+
+      if (left + tooltipWidth > chartViewport.clientWidth - 8) {
+        left = event.clientX - viewportRect.left - tooltipWidth - 12;
       }
-      top = Math.max(8, Math.min(top, rect.height - tooltipHeight - 8));
+      left = Math.max(8, left);
+      top = Math.max(8, Math.min(top, chartViewport.clientHeight - tooltipHeight - 8));
       tooltip.style.left = `${left}px`;
       tooltip.style.top = `${top}px`;
     });
@@ -304,6 +412,73 @@
       hoverDot.hidden = true;
       tooltip.hidden = true;
     });
+  }
+
+  function captureScrollState() {
+    const maxLeft = Math.max(chartViewport.scrollWidth - chartViewport.clientWidth, 0);
+    const maxTop = Math.max(chartViewport.scrollHeight - chartViewport.clientHeight, 0);
+    return {
+      left: chartViewport.scrollLeft,
+      top: chartViewport.scrollTop,
+      maxLeft,
+      maxTop,
+      nearRight: maxLeft - chartViewport.scrollLeft <= 40,
+      horizontalRatio: maxLeft > 0 ? chartViewport.scrollLeft / maxLeft : 1,
+      verticalRatio: maxTop > 0 ? chartViewport.scrollTop / maxTop : 0
+    };
+  }
+
+  function restoreScrollState({ previousScroll, preserveScroll, latestPointY }) {
+    requestAnimationFrame(() => {
+      const maxLeft = Math.max(chartViewport.scrollWidth - chartViewport.clientWidth, 0);
+      const maxTop = Math.max(chartViewport.scrollHeight - chartViewport.clientHeight, 0);
+
+      if (!preserveScroll || previousScroll.nearRight) {
+        chartViewport.scrollLeft = maxLeft;
+        chartViewport.scrollTop = clamp(
+          latestPointY - chartViewport.clientHeight / 2,
+          0,
+          maxTop
+        );
+        return;
+      }
+
+      chartViewport.scrollLeft = clamp(
+        previousScroll.horizontalRatio * maxLeft,
+        0,
+        maxLeft
+      );
+      chartViewport.scrollTop = clamp(
+        previousScroll.verticalRatio * maxTop,
+        0,
+        maxTop
+      );
+    });
+  }
+
+  function readChartOptions() {
+    const visibleResults = parseIntegerInRange(
+      visibleResultsInput.value,
+      2,
+      10_000
+    );
+    const visibleHeight = parseIntegerInRange(
+      visibleHeightInput.value,
+      1,
+      1_000_000
+    );
+
+    if (visibleResults === null || visibleHeight === null) {
+      return null;
+    }
+
+    return { visibleResults, visibleHeight };
+  }
+
+  function normalizeChartInputs(options) {
+    lastChartOptions = { ...options };
+    visibleResultsInput.value = String(options.visibleResults);
+    visibleHeightInput.value = String(options.visibleHeight);
   }
 
   function findNearestPoint(points, targetIndex) {
@@ -336,6 +511,18 @@
     return Math.round(value * 10000) / 10000;
   }
 
+  function parseIntegerInRange(rawValue, min, max) {
+    const value = Number(String(rawValue).trim());
+    if (!Number.isInteger(value) || value < min || value > max) {
+      return null;
+    }
+    return value;
+  }
+
+  function calculateNiceIntegerStep(rawStep) {
+    return Math.max(1, Math.round(calculateNiceStep(rawStep)));
+  }
+
   function calculateNiceStep(rawStep) {
     if (!Number.isFinite(rawStep) || rawStep <= 0) {
       return 1;
@@ -361,6 +548,10 @@
 
   function normalizeFloatingPoint(value) {
     return Number(Number(value).toPrecision(12));
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
   }
 
   function setConnection(isOnline) {

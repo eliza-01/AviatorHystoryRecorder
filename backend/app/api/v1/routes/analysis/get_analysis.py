@@ -14,11 +14,7 @@ router = APIRouter(prefix="/analysis", tags=["analysis"])
 @router.get("", response_model=AnalysisResponse)
 async def get_analysis(
     x: Decimal = Query(default=Decimal("2.00"), ge=1, le=1_000_000),
-    max_points: int = Query(default=5000, ge=100, le=10_000),
     session: AsyncSession = Depends(get_db_session),
 ) -> AnalysisResponse:
     repository = GameResultRepository(session)
-    return await AnalysisService(repository).calculate(
-        threshold=x,
-        max_points=max_points,
-    )
+    return await AnalysisService(repository).calculate(threshold=x)
