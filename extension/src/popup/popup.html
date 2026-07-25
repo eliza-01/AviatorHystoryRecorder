@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aviator History Recorder</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="panel">
+    <div class="title-row">
+      <h1>Aviator Recorder</h1>
+      <span id="version" class="version">—</span>
+    </div>
+
+    <label class="switch-row">
+      <span>Сбор включён</span>
+      <input id="enabled" type="checkbox">
+    </label>
+
+    <label class="field">
+      <span>API URL</span>
+      <input id="apiBaseUrl" type="url" autocomplete="off" spellcheck="false">
+    </label>
+
+    <div class="buttons">
+      <button id="save" type="button">Сохранить</button>
+      <button id="test" type="button" class="secondary">Проверить API</button>
+      <button id="flush" type="button" class="secondary">Отправить очередь</button>
+      <button id="resetDom" type="button" class="secondary">Сбросить DOM-базу</button>
+    </div>
+
+    <section class="collector-card">
+      <h2>DOM-сборщик</h2>
+      <div class="collector-row"><span>Кадров расширения</span><strong id="framesSeen">0</strong></div>
+      <div class="collector-row"><span>Блок истории</span><strong id="historyFound">не найден</strong></div>
+      <div class="collector-row"><span>Результатов в блоке</span><strong id="historySize">0</strong></div>
+      <div class="collector-row"><span>Состояние</span><strong id="collectorStage">—</strong></div>
+      <div class="collector-row"><span>Последняя проверка</span><strong id="collectorObservedAt">—</strong></div>
+      <p id="collectorFrameUrl" class="frame-url"></p>
+    </section>
+
+    <section class="status-grid">
+      <div><span>Очередь результатов</span><strong id="resultQueueSize">0</strong></div>
+      <div><span>Очередь диагностики</span><strong id="sampleQueueSize">0</strong></div>
+      <div><span>Сохранено</span><strong id="acceptedResults">0</strong></div>
+      <div><span>Дубликаты</span><strong id="duplicateResults">0</strong></div>
+    </section>
+
+    <p id="status" class="status">Загрузка…</p>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
