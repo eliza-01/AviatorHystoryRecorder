@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aviator — анализ результатов</title>
-  <link rel="stylesheet" href="/assets/app.css?v=20260726.3">
+  <link rel="stylesheet" href="/assets/app.css?v=20260726.5">
 </head>
 <body>
   <main class="page-shell">
@@ -87,9 +87,25 @@
           <h2 id="chart-title">Накопительный результат</h2>
           <p id="chart-caption">Ожидание данных…</p>
         </div>
-        <div class="chart-legend">
-          <span><i class="legend-line"></i> Баланс</span>
-          <span><i class="legend-zero"></i> Нулевая линия</span>
+        <div class="chart-heading-actions">
+          <div class="chart-legend">
+            <span><i class="legend-line"></i> Баланс</span>
+            <span><i class="legend-zero"></i> Нулевая линия</span>
+          </div>
+          <div class="chart-tools" aria-label="Инструменты графика">
+            <label class="chart-tool-toggle">
+              <input id="crosshair-enabled" type="checkbox">
+              <span>Перекрестье</span>
+            </label>
+            <button
+              id="add-horizontal-line-button"
+              class="secondary-button"
+              type="button"
+              aria-pressed="false"
+            >
+              + Горизонтальная линия
+            </button>
+          </div>
         </div>
       </div>
       <div class="chart-wrap" id="chart-wrap">
@@ -98,6 +114,7 @@
             <svg id="result-chart" role="img" aria-label="График накопительного результата"></svg>
           </div>
         </div>
+        <div id="manual-lines-layer" class="manual-lines-layer" aria-label="Горизонтальные линии" hidden></div>
         <div id="chart-y-axis" class="chart-axis-overlay chart-y-axis" aria-hidden="true" hidden></div>
         <div id="chart-x-axis" class="chart-axis-overlay chart-x-axis" aria-hidden="true" hidden></div>
         <div id="chart-axis-corner" class="chart-axis-corner" aria-hidden="true" hidden></div>
@@ -159,6 +176,6 @@
     <div class="error-box" id="error-box" role="alert" hidden></div>
   </main>
 
-  <script src="/assets/app.js?v=20260726.4" defer></script>
+  <script src="/assets/app.js?v=20260726.6" defer></script>
 </body>
 </html>

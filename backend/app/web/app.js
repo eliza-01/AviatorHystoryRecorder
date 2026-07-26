@@ -6,6 +6,8 @@
   const visibleHeightInput = document.getElementById("visible-height-input");
   const calculateButton = document.getElementById("calculate-button");
   const autoRefresh = document.getElementById("auto-refresh");
+  const crosshairEnabled = document.getElementById("crosshair-enabled");
+  const addHorizontalLineButton = document.getElementById("add-horizontal-line-button");
   const connectionStatus = document.getElementById("connection-status");
   const lastUpdate = document.getElementById("last-update");
   const chartCaption = document.getElementById("chart-caption");
@@ -16,6 +18,7 @@
   const chartYAxis = document.getElementById("chart-y-axis");
   const chartXAxis = document.getElementById("chart-x-axis");
   const chartAxisCorner = document.getElementById("chart-axis-corner");
+  const manualLinesLayer = document.getElementById("manual-lines-layer");
   const chartEmpty = document.getElementById("chart-empty");
   const tooltip = document.getElementById("chart-tooltip");
   const errorBox = document.getElementById("error-box");
@@ -53,6 +56,9 @@
   let chartHasRendered = false;
   let currentAxisModel = null;
   let axisRenderFrame = null;
+  let manualLines = [];
+  let linePlacementMode = false;
+  let activeLineDragId = null;
   let lastChartOptions = {
     visibleResults: 100,
     visibleHeight: 50
@@ -82,6 +88,28 @@
   autoRefresh.addEventListener("change", () => {
     saveInterfaceSettings();
     configureAutoRefresh();
+  });
+  crosshairEnabled.addEventListener("change", () => {
+    saveInterfaceSettings();
+    if (!crosshairEnabled.checked) {
+      const horizontalHoverLine = chart.querySelector("#hover-horizontal-line");
+      if (horizontalHoverLine) {
+        setElementHidden(horizontalHoverLine, true);
+      }
+    }
+  });
+  addHorizontalLineButton.addEventListener("click", () => {
+    setLinePlacementMode(!linePlacementMode);
+  });
+  manualLinesLayer.addEventListener("pointerdown", handleManualLinePointerDown);
+  manualLinesLayer.addEventListener("click", handleManualLineClick);
+  window.addEventListener("pointermove", handleManualLinePointerMove);
+  window.addEventListener("pointerup", stopManualLineDrag);
+  window.addEventListener("pointercancel", stopManualLineDrag);
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && linePlacementMode) {
+      setLinePlacementMode(false);
+    }
   });
   chartViewport.addEventListener("scroll", () => {
     tooltip.hidden = true;
@@ -259,6 +287,9 @@
       currentAxisModel = null;
       chartYAxis.innerHTML = "";
       chartXAxis.innerHTML = "";
+      manualLinesLayer.innerHTML = "";
+      manualLinesLayer.hidden = true;
+      setLinePlacementMode(false);
       setElementHidden(chartYAxis, true);
       setElementHidden(chartXAxis, true);
       chartAxisCorner.hidden = true;
@@ -285,8 +316,11 @@
     const width = margin.left + plotWidth + margin.right;
 
     const balances = points.map((point) => Number(point.balance));
-    const dataMinY = Math.min(0, ...balances);
-    const dataMaxY = Math.max(0, ...balances);
+    const manualLineValues = manualLines
+      .map((line) => Number(line.value))
+      .filter(Number.isFinite);
+    const dataMinY = Math.min(0, ...balances, ...manualLineValues);
+    const dataMaxY = Math.max(0, ...balances, ...manualLineValues);
     const yTickStep = calculateNiceStep(options.visibleHeight / 5);
     let minY = Math.floor(dataMinY / yTickStep) * yTickStep;
     let maxY = Math.ceil(dataMaxY / yTickStep) * yTickStep;
@@ -354,6 +388,7 @@
     svgParts.push(`<path class="chart-path" d="${path}"></path>`);
     svgParts.push(
       `<line id="hover-line" class="chart-hover-line" hidden></line>` +
+      `<line id="hover-horizontal-line" class="chart-hover-horizontal-line" hidden></line>` +
       `<circle id="hover-dot" class="chart-hover-dot" r="5" hidden></circle>` +
       `<rect id="chart-overlay" x="${margin.left}" y="${margin.top}" ` +
       `width="${plotWidth}" height="${plotHeight}" fill="transparent"></rect>`
@@ -365,7 +400,12 @@
       viewportWidth,
       viewportHeight,
       yTicks,
-      xTicks
+      xTicks,
+      minY,
+      maxY,
+      yRange,
+      plotHeight,
+      height
     };
     setElementHidden(chartYAxis, false);
     setElementHidden(chartXAxis, false);
@@ -377,6 +417,7 @@
       minX,
       xRange,
       plotWidth,
+      width,
       height,
       margin,
       xScale,
@@ -397,6 +438,7 @@
     minX,
     xRange,
     plotWidth,
+    width,
     height,
     margin,
     xScale,
@@ -404,6 +446,7 @@
   }) {
     const overlay = chart.querySelector("#chart-overlay");
     const hoverLine = chart.querySelector("#hover-line");
+    const horizontalHoverLine = chart.querySelector("#hover-horizontal-line");
     const hoverDot = chart.querySelector("#hover-dot");
 
     overlay.addEventListener("pointermove", (event) => {
@@ -419,6 +462,16 @@
       hoverLine.setAttribute("x2", px);
       hoverLine.setAttribute("y1", margin.top);
       hoverLine.setAttribute("y2", height - margin.bottom);
+
+      if (crosshairEnabled.checked) {
+        setElementHidden(horizontalHoverLine, false);
+        horizontalHoverLine.setAttribute("x1", margin.left);
+        horizontalHoverLine.setAttribute("x2", width - margin.right);
+        horizontalHoverLine.setAttribute("y1", py);
+        horizontalHoverLine.setAttribute("y2", py);
+      } else {
+        setElementHidden(horizontalHoverLine, true);
+      }
 
       setElementHidden(hoverDot, false);
       hoverDot.setAttribute("cx", px);
@@ -447,8 +500,28 @@
       tooltip.style.top = `${top}px`;
     });
 
+    overlay.addEventListener("click", (event) => {
+      if (!linePlacementMode || !currentAxisModel) {
+        return;
+      }
+
+      const value = chartValueFromClientY(event.clientY);
+      if (value === null) {
+        return;
+      }
+
+      manualLines.push({
+        id: createManualLineId(),
+        value
+      });
+      saveInterfaceSettings();
+      setLinePlacementMode(false);
+      renderManualLinesOverlay();
+    });
+
     overlay.addEventListener("pointerleave", () => {
       setElementHidden(hoverLine, true);
+      setElementHidden(horizontalHoverLine, true);
       setElementHidden(hoverDot, true);
       tooltip.hidden = true;
     });
@@ -564,6 +637,183 @@
       );
     }
     chartXAxis.innerHTML = xParts.join("");
+    renderManualLinesOverlay();
+  }
+
+  function setLinePlacementMode(enabled) {
+    linePlacementMode = Boolean(enabled && currentAxisModel);
+    addHorizontalLineButton.classList.toggle("is-active", linePlacementMode);
+    addHorizontalLineButton.setAttribute("aria-pressed", String(linePlacementMode));
+    addHorizontalLineButton.textContent = linePlacementMode
+      ? "Кликните по графику…"
+      : "+ Горизонтальная линия";
+    chartWrap.classList.toggle("is-line-placement", linePlacementMode);
+  }
+
+  function renderManualLinesOverlay() {
+    if (!currentAxisModel || manualLines.length === 0) {
+      manualLinesLayer.innerHTML = "";
+      manualLinesLayer.hidden = true;
+      return;
+    }
+
+    const {
+      margin,
+      minY,
+      maxY,
+      yRange,
+      plotHeight
+    } = currentAxisModel;
+    const viewportHeight = chartViewport.clientHeight;
+    const scrollbarWidth = Math.max(
+      chartViewport.offsetWidth - chartViewport.clientWidth,
+      0
+    );
+    const scrollbarHeight = Math.max(
+      chartViewport.offsetHeight - chartViewport.clientHeight,
+      0
+    );
+    const layerBottom = margin.bottom + scrollbarHeight;
+    const layerHeight = Math.max(viewportHeight - layerBottom, 1);
+
+    manualLinesLayer.style.left = `${margin.left}px`;
+    manualLinesLayer.style.right = `${scrollbarWidth}px`;
+    manualLinesLayer.style.top = "0";
+    manualLinesLayer.style.bottom = `${layerBottom}px`;
+
+    const rows = [];
+    for (const line of manualLines) {
+      const value = clamp(Number(line.value), minY, maxY);
+      const contentY =
+        margin.top + ((maxY - value) / yRange) * plotHeight;
+      const viewportY = contentY - chartViewport.scrollTop;
+
+      if (viewportY < -20 || viewportY > layerHeight + 20) {
+        continue;
+      }
+
+      rows.push(
+        `<div class="manual-line" data-line-id="${escapeXml(line.id)}" ` +
+        `style="top:${viewportY}px">` +
+        `<button class="manual-line-drag" type="button" ` +
+        `aria-label="Переместить горизонтальную линию ${escapeXml(formatNumber(value))}">` +
+        `<span class="manual-line-stroke" aria-hidden="true"></span>` +
+        `</button>` +
+        `<span class="manual-line-value">${escapeXml(formatNumber(value))}</span>` +
+        `<button class="manual-line-delete" type="button" ` +
+        `aria-label="Удалить горизонтальную линию">×</button>` +
+        `</div>`
+      );
+    }
+
+    manualLinesLayer.innerHTML = rows.join("");
+    manualLinesLayer.hidden = rows.length === 0;
+  }
+
+  function handleManualLinePointerDown(event) {
+    const dragControl = event.target.closest(".manual-line-drag");
+    if (!dragControl) {
+      return;
+    }
+
+    const row = dragControl.closest(".manual-line");
+    if (!row) {
+      return;
+    }
+
+    event.preventDefault();
+    activeLineDragId = row.dataset.lineId || null;
+    chartWrap.classList.add("is-dragging-line");
+    updateDraggedManualLine(event.clientY);
+  }
+
+  function handleManualLinePointerMove(event) {
+    if (!activeLineDragId) {
+      return;
+    }
+
+    event.preventDefault();
+    updateDraggedManualLine(event.clientY);
+  }
+
+  function stopManualLineDrag() {
+    if (!activeLineDragId) {
+      return;
+    }
+
+    activeLineDragId = null;
+    chartWrap.classList.remove("is-dragging-line");
+    saveInterfaceSettings();
+  }
+
+  function handleManualLineClick(event) {
+    const deleteButton = event.target.closest(".manual-line-delete");
+    if (!deleteButton) {
+      return;
+    }
+
+    const row = deleteButton.closest(".manual-line");
+    if (!row) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    manualLines = manualLines.filter((line) => line.id !== row.dataset.lineId);
+    saveInterfaceSettings();
+
+    if (latestResponse) {
+      renderChart(latestResponse.points, { preserveScroll: true });
+    } else {
+      renderManualLinesOverlay();
+    }
+  }
+
+  function updateDraggedManualLine(clientY) {
+    const value = chartValueFromClientY(clientY);
+    if (value === null) {
+      return;
+    }
+
+    const line = manualLines.find((item) => item.id === activeLineDragId);
+    if (!line) {
+      return;
+    }
+
+    line.value = value;
+    renderManualLinesOverlay();
+  }
+
+  function chartValueFromClientY(clientY) {
+    if (!currentAxisModel) {
+      return null;
+    }
+
+    const {
+      margin,
+      minY,
+      maxY,
+      yRange,
+      plotHeight
+    } = currentAxisModel;
+    const viewportRect = chartViewport.getBoundingClientRect();
+    const contentY =
+      clientY - viewportRect.top + chartViewport.scrollTop;
+    const plotPosition = clamp(
+      (contentY - margin.top) / plotHeight,
+      0,
+      1
+    );
+    const value = maxY - plotPosition * yRange;
+    return normalizeFloatingPoint(clamp(value, minY, maxY));
+  }
+
+  function createManualLineId() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+
+    return `line-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
   function enableWheelNumberInput(input, { decimals }) {
@@ -618,6 +868,18 @@
       if (typeof settings.autoRefresh === "boolean") {
         autoRefresh.checked = settings.autoRefresh;
       }
+      if (typeof settings.crosshairEnabled === "boolean") {
+        crosshairEnabled.checked = settings.crosshairEnabled;
+      }
+      if (Array.isArray(settings.manualLines)) {
+        manualLines = settings.manualLines
+          .slice(0, 50)
+          .map((line) => ({
+            id: typeof line?.id === "string" ? line.id : createManualLineId(),
+            value: Number(line?.value)
+          }))
+          .filter((line) => Number.isFinite(line.value));
+      }
     } catch (_error) {
       // Повреждённые или недоступные локальные настройки не мешают работе страницы.
     }
@@ -631,7 +893,9 @@
           threshold: thresholdInput.value,
           visibleResults: visibleResultsInput.value,
           visibleHeight: visibleHeightInput.value,
-          autoRefresh: autoRefresh.checked
+          autoRefresh: autoRefresh.checked,
+          crosshairEnabled: crosshairEnabled.checked,
+          manualLines
         })
       );
     } catch (_error) {
