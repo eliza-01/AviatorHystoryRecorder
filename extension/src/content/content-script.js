@@ -504,12 +504,9 @@
   }
 
   function parseMultiplier(rawValue) {
-    const normalized = String(rawValue || "")
-      .replace(/\s+/g, "")
-      .replace(/[xх]$/i, "")
-      .replace(",", ".");
+    const normalized = normalizeLocalizedNumber(rawValue);
 
-    if (!/^\d{1,9}(?:\.\d{1,4})?$/.test(normalized)) {
+    if (normalized === null || !/^\d{1,9}(?:\.\d{1,4})?$/.test(normalized)) {
       return null;
     }
 
@@ -519,6 +516,46 @@
     }
 
     return Number(value.toFixed(2));
+  }
+
+  function normalizeLocalizedNumber(rawValue) {
+    let value = String(rawValue ?? "")
+      .trim()
+      .replace(/[xх]$/i, "")
+      .replace(/[\s\u00a0\u202f'’]/g, "");
+
+    if (!value || !/^\d[\d.,]*$/.test(value)) {
+      return null;
+    }
+
+    const commaCount = (value.match(/,/g) || []).length;
+    const dotCount = (value.match(/\./g) || []).length;
+
+    if (commaCount > 0 && dotCount > 0) {
+      // Последний разделитель — десятичный, остальные — разделители тысяч.
+      // 2,391.46 -> 2391.46; 2.391,46 -> 2391.46.
+      if (value.lastIndexOf(",") > value.lastIndexOf(".")) {
+        value = value.replace(/\./g, "").replace(",", ".");
+      } else {
+        value = value.replace(/,/g, "");
+      }
+    } else if (commaCount > 0) {
+      if (/^\d{1,3}(?:,\d{3})+$/.test(value)) {
+        value = value.replace(/,/g, "");
+      } else if (commaCount === 1) {
+        value = value.replace(",", ".");
+      } else {
+        return null;
+      }
+    } else if (dotCount > 1) {
+      if (/^\d{1,3}(?:\.\d{3})+$/.test(value)) {
+        value = value.replace(/\./g, "");
+      } else {
+        return null;
+      }
+    }
+
+    return value;
   }
 
   function formatMultiplier(value) {
