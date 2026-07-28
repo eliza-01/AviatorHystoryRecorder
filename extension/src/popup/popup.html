@@ -23,13 +23,46 @@
       <input id="apiBaseUrl" type="url" autocomplete="off" spellcheck="false">
     </label>
 
-    <section class="reload-card" aria-labelledby="reload-title">
-      <label class="switch-row reload-switch">
-        <span id="reload-title">Автообновление страницы</span>
-        <input id="pageAutoReloadEnabled" type="checkbox">
+    <section class="preparation-card" aria-labelledby="preparation-title">
+      <label class="switch-row preparation-switch">
+        <span id="preparation-title">Подготовка</span>
+        <input id="preparationEnabled" type="checkbox">
       </label>
-      <label class="field reload-interval-field">
-        <span>Перезагружать каждые, секунд</span>
+      <div class="preparation-fields">
+        <label class="field">
+          <span>Ставка</span>
+          <input
+            id="preparationBet"
+            type="number"
+            min="0.01"
+            max="999999999"
+            step="0.01"
+            value="1"
+            inputmode="decimal"
+            disabled
+          >
+        </label>
+        <label class="field">
+          <span>Кэшаут</span>
+          <input
+            id="preparationCashout"
+            type="number"
+            min="1.01"
+            max="1000000"
+            step="0.01"
+            value="2"
+            inputmode="decimal"
+            disabled
+          >
+        </label>
+      </div>
+      <small id="preparationStatus">Подготовка выключена</small>
+    </section>
+
+    <section class="reload-row" aria-labelledby="reload-title">
+      <span id="reload-title" class="reload-title">Автообновление</span>
+      <label class="reload-period" for="pageAutoReloadSeconds">
+        <span>Каждые</span>
         <input
           id="pageAutoReloadSeconds"
           type="number"
@@ -38,9 +71,18 @@
           step="1"
           value="60"
           inputmode="numeric"
+          aria-label="Интервал автообновления в секундах"
           disabled
         >
-        <small>Работает только для вкладки Aviator. Минимум 5 секунд.</small>
+        <span>сек</span>
+      </label>
+      <label class="reload-toggle" title="Включить автообновление">
+        <input
+          id="pageAutoReloadEnabled"
+          type="checkbox"
+          aria-label="Автообновление"
+        >
+        <span aria-hidden="true"></span>
       </label>
     </section>
 

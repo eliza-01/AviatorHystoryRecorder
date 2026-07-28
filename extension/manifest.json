@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Aviator History Recorder",
-  "version": "1.4.1",
-  "description": "Сохраняет завершённые результаты Aviator в локальный Python/MySQL API и умеет автоматически перезагружать вкладку игры.",
+  "version": "1.5.3",
+  "description": "Сохраняет результаты Aviator, настраивает интерфейс игры и умеет автоматически перезагружать вкладку.",
   "permissions": [
     "storage",
     "alarms"
@@ -26,7 +26,22 @@
         "https://*/*"
       ],
       "js": [
-        "src/content/content-script.js"
+        "src/content/preparation-page-bridge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "src/content/content-script.js",
+        "src/content/preparation-script.js"
       ],
       "run_at": "document_start",
       "all_frames": true,

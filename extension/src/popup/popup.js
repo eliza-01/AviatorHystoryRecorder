@@ -2,6 +2,10 @@ const elements = {
   version: document.querySelector("#version"),
   enabled: document.querySelector("#enabled"),
   apiBaseUrl: document.querySelector("#apiBaseUrl"),
+  preparationEnabled: document.querySelector("#preparationEnabled"),
+  preparationBet: document.querySelector("#preparationBet"),
+  preparationCashout: document.querySelector("#preparationCashout"),
+  preparationStatus: document.querySelector("#preparationStatus"),
   pageAutoReloadEnabled: document.querySelector("#pageAutoReloadEnabled"),
   pageAutoReloadSeconds: document.querySelector("#pageAutoReloadSeconds"),
   save: document.querySelector("#save"),
@@ -37,12 +41,27 @@ const STAGE_LABELS = {
   "collector-error": "ошибка DOM-сборщика"
 };
 
+const PREPARATION_STAGE_LABELS = {
+  "not-started": "Ожидание загрузки игры",
+  disabled: "Подготовка выключена",
+  "waiting-game": "Ожидание интерфейса Aviator…",
+  "switching-auto": "Переключение на «Авто»…",
+  "enabling-cashout": "Включение авто кешаута…",
+  "setting-cashout": "Установка кэшаута…",
+  "setting-bet": "Установка ставки…",
+  completed: "Интерфейс игры подготовлен",
+  error: "Ошибка подготовки"
+};
+
 let refreshTimer = null;
 let settingsDirty = false;
 
 const settingsElements = [
   elements.enabled,
   elements.apiBaseUrl,
+  elements.preparationEnabled,
+  elements.preparationBet,
+  elements.preparationCashout,
   elements.pageAutoReloadEnabled,
   elements.pageAutoReloadSeconds
 ];
@@ -52,6 +71,7 @@ for (const element of settingsElements) {
   element.addEventListener("change", markSettingsDirty);
 }
 
+elements.preparationEnabled.addEventListener("change", syncPreparationFields);
 elements.pageAutoReloadEnabled.addEventListener("change", syncReloadFields);
 elements.save.addEventListener("click", save);
 elements.test.addEventListener("click", testConnection);
@@ -84,19 +104,26 @@ async function load(showLoading = true) {
 }
 
 function render(response) {
-  const { version, settings, stats, queues, collector } = response;
+  const { version, settings, stats, queues, collector, preparation } = response;
   elements.version.textContent = `v${version || "?"}`;
   if (!settingsDirty && !isEditingSettings()) {
     elements.enabled.checked = Boolean(settings.enabled);
     elements.apiBaseUrl.value = settings.apiBaseUrl || "";
+    elements.preparationEnabled.checked = Boolean(settings.preparationEnabled);
+    elements.preparationBet.value = String(settings.preparationBet ?? 1);
+    elements.preparationCashout.value = String(settings.preparationCashout ?? 2);
     elements.pageAutoReloadEnabled.checked = Boolean(
       settings.pageAutoReloadEnabled
     );
     elements.pageAutoReloadSeconds.value = String(
       settings.pageAutoReloadSeconds || 60
     );
+    syncPreparationFields();
     syncReloadFields();
   }
+
+  renderPreparationStatus(preparation, settings);
+
   elements.resultQueueSize.textContent = String(queues.resultQueueSize || 0);
   elements.sampleQueueSize.textContent = String(queues.sampleQueueSize || 0);
   elements.acceptedResults.textContent = String(stats.acceptedResults || 0);
@@ -112,10 +139,40 @@ function render(response) {
   elements.collectorFrameUrl.textContent = collector?.frameUrl || "";
 }
 
+function renderPreparationStatus(preparation, settings) {
+  const enabled = Boolean(settings?.preparationEnabled);
+  const stage = enabled ? preparation?.stage || "not-started" : "disabled";
+  const label = PREPARATION_STAGE_LABELS[stage] || stage;
+  const suffix =
+    stage === "completed" && preparation?.bet && preparation?.cashout
+      ? `: ставка ${formatNumber(preparation.bet)}, кэшаут ${formatNumber(preparation.cashout)}x`
+      : "";
+
+  const preparationError = enabled ? preparation?.error : null;
+  elements.preparationStatus.textContent = preparationError
+    ? `${label}: ${preparationError}`
+    : `${label}${suffix}`;
+  elements.preparationStatus.classList.toggle("ok", stage === "completed");
+  elements.preparationStatus.classList.toggle(
+    "error",
+    stage === "error" || Boolean(preparationError)
+  );
+}
+
 async function save() {
   setStatus("Сохранение…");
   const reloadSeconds = normalizeReloadSeconds(
     elements.pageAutoReloadSeconds.value
+  );
+  const preparationBet = normalizeDecimal(
+    elements.preparationBet.value,
+    0.01,
+    999_999_999
+  );
+  const preparationCashout = normalizeDecimal(
+    elements.preparationCashout.value,
+    1.01,
+    1_000_000
   );
 
   if (reloadSeconds === null) {
@@ -124,12 +181,30 @@ async function save() {
     return false;
   }
 
+  if (preparationBet === null) {
+    setStatus("Ставка должна быть числом больше 0", true);
+    elements.preparationBet.focus();
+    return false;
+  }
+
+  if (preparationCashout === null) {
+    setStatus("Кэшаут должен быть от 1.01 до 1000000", true);
+    elements.preparationCashout.focus();
+    return false;
+  }
+
   elements.pageAutoReloadSeconds.value = String(reloadSeconds);
+  elements.preparationBet.value = formatNumber(preparationBet);
+  elements.preparationCashout.value = formatNumber(preparationCashout);
+
   const response = await chrome.runtime.sendMessage({
     type: "SAVE_SETTINGS",
     settings: {
       enabled: elements.enabled.checked,
       apiBaseUrl: elements.apiBaseUrl.value,
+      preparationEnabled: elements.preparationEnabled.checked,
+      preparationBet,
+      preparationCashout,
       pageAutoReloadEnabled: elements.pageAutoReloadEnabled.checked,
       pageAutoReloadSeconds: reloadSeconds
     }
@@ -204,6 +279,12 @@ function setStatus(message, error = false, ok = false) {
   elements.status.classList.toggle("ok", ok);
 }
 
+function syncPreparationFields() {
+  const disabled = !elements.preparationEnabled.checked;
+  elements.preparationBet.disabled = disabled;
+  elements.preparationCashout.disabled = disabled;
+}
+
 function syncReloadFields() {
   elements.pageAutoReloadSeconds.disabled =
     !elements.pageAutoReloadEnabled.checked;
@@ -215,6 +296,18 @@ function normalizeReloadSeconds(value) {
     return null;
   }
   return Math.round(parsed);
+}
+
+function normalizeDecimal(value, minimum, maximum) {
+  const parsed = Number(String(value).trim().replace(",", "."));
+  if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+    return null;
+  }
+  return Number(parsed.toFixed(2));
+}
+
+function formatNumber(value) {
+  return Number(value).toFixed(2).replace(/\.00$/, "");
 }
 
 function markSettingsDirty() {

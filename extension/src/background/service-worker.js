@@ -16,10 +16,14 @@ import { isAviatorTabUrl } from "./url-service.js";
 
 const FLUSH_ALARM = "flush-aviator-queues";
 const COLLECTOR_FRAME_TTL_MS = 10 * 60 * 1000;
+const PREPARATION_FRAME_TTL_MS = 10 * 60 * 1000;
 
 chrome.runtime.onInstalled.addListener(async () => {
   await getSettings();
-  await chrome.storage.local.remove(STORAGE_KEYS.collectorFrames);
+  await chrome.storage.local.remove([
+    STORAGE_KEYS.collectorFrames,
+    STORAGE_KEYS.preparationFrames
+  ]);
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
 });
 
@@ -60,6 +64,9 @@ async function handleMessage(message, sender) {
     case "COLLECTOR_STATUS":
       return saveCollectorStatus(sender, message);
 
+    case "PREPARATION_STATUS":
+      return savePreparationStatus(sender, message);
+
     case "GET_POPUP_STATE":
       return getPopupState();
 
@@ -99,7 +106,12 @@ async function getCaptureState(sender, message) {
     pageAutoReloadEnabled: Boolean(
       settings.pageAutoReloadEnabled && aviatorTab
     ),
-    pageAutoReloadSeconds: Number(settings.pageAutoReloadSeconds)
+    pageAutoReloadSeconds: Number(settings.pageAutoReloadSeconds),
+    preparationEnabled: Boolean(
+      settings.preparationEnabled && aviatorTab
+    ),
+    preparationBet: Number(settings.preparationBet),
+    preparationCashout: Number(settings.preparationCashout)
   };
 }
 
@@ -210,12 +222,14 @@ async function saveCollectorStatus(sender, message) {
 }
 
 async function getPopupState() {
-  const [settings, stats, queues, collectorStored] = await Promise.all([
-    getSettings(),
-    getStats(),
-    getQueueSizes(),
-    chrome.storage.local.get(STORAGE_KEYS.collectorFrames)
-  ]);
+  const [settings, stats, queues, collectorStored, preparationStored] =
+    await Promise.all([
+      getSettings(),
+      getStats(),
+      getQueueSizes(),
+      chrome.storage.local.get(STORAGE_KEYS.collectorFrames),
+      chrome.storage.local.get(STORAGE_KEYS.preparationFrames)
+    ]);
 
   return {
     ok: true,
@@ -225,7 +239,81 @@ async function getPopupState() {
     queues,
     collector: summarizeCollectorFrames(
       collectorStored[STORAGE_KEYS.collectorFrames]
+    ),
+    preparation: summarizePreparationFrames(
+      preparationStored[STORAGE_KEYS.preparationFrames]
     )
+  };
+}
+
+async function savePreparationStatus(sender, message) {
+  const topUrl = sender.tab?.url || message.pageUrl || "";
+  if (!isAviatorTabUrl(topUrl)) {
+    return { ok: true, ignored: true };
+  }
+
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.preparationFrames);
+  const current =
+    stored[STORAGE_KEYS.preparationFrames] &&
+    typeof stored[STORAGE_KEYS.preparationFrames] === "object"
+      ? stored[STORAGE_KEYS.preparationFrames]
+      : {};
+
+  const now = Date.now();
+  const cleaned = {};
+  for (const [key, value] of Object.entries(current)) {
+    const observedAt = Date.parse(value?.observedAt || "");
+    if (
+      Number.isFinite(observedAt) &&
+      now - observedAt < PREPARATION_FRAME_TTL_MS
+    ) {
+      cleaned[key] = value;
+    }
+  }
+
+  const tabId = sender.tab?.id ?? "unknown-tab";
+  const frameId = sender.frameId ?? "unknown-frame";
+  cleaned[`${tabId}:${frameId}`] = {
+    ...(message.status || {}),
+    tabId,
+    frameId,
+    topUrl: sanitizeStatusUrl(topUrl),
+    frameUrl: sanitizeStatusUrl(sender.url || message.frameUrl || ""),
+    observedAt: message.status?.observedAt || new Date().toISOString()
+  };
+
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.preparationFrames]: cleaned
+  });
+
+  return { ok: true };
+}
+
+function summarizePreparationFrames(value) {
+  const frames = value && typeof value === "object" ? Object.values(value) : [];
+  const recent = frames
+    .filter((frame) => {
+      const observedAt = Date.parse(frame?.observedAt || "");
+      return (
+        Number.isFinite(observedAt) &&
+        Date.now() - observedAt < PREPARATION_FRAME_TTL_MS
+      );
+    })
+    .sort(
+      (left, right) =>
+        Date.parse(right?.observedAt || "") -
+        Date.parse(left?.observedAt || "")
+    );
+
+  const best = recent[0] || null;
+
+  return {
+    stage: best?.stage || "not-started",
+    error: best?.error || null,
+    bet: best?.bet ?? null,
+    cashout: best?.cashout ?? null,
+    frameUrl: best?.frameUrl || null,
+    observedAt: best?.observedAt || null
   };
 }
 

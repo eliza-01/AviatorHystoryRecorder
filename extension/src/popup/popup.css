@@ -61,7 +61,7 @@ input[type="number"] {
 }
 
 
-.reload-card {
+.preparation-card {
   display: grid;
   gap: 10px;
   margin: 14px 0 0;
@@ -71,25 +71,127 @@ input[type="number"] {
   background: #1d2025;
 }
 
-.reload-card .switch-row,
-.reload-card .field {
+.preparation-card .switch-row,
+.preparation-card .field {
   margin-bottom: 0;
 }
 
-.reload-switch {
+.preparation-switch {
   align-items: center;
   font-weight: 600;
 }
 
-.reload-interval-field small {
+.preparation-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.preparation-fields input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.preparation-card > small {
   color: #7f8792;
   font-size: 10px;
   line-height: 1.35;
 }
 
-.reload-interval-field input:disabled {
+.preparation-card > small.ok {
+  color: #69e79a;
+}
+
+.preparation-card > small.error {
+  color: #ff8585;
+}
+
+.reload-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 9px 0;
+  border-top: 1px solid #343a43;
+  border-bottom: 1px solid #343a43;
+}
+
+.reload-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reload-period {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  color: #aeb5bf;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.reload-period input[type="number"] {
+  width: 64px;
+  padding: 6px 7px;
+  text-align: center;
+}
+
+.reload-period input:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.reload-toggle {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.reload-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.reload-toggle span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #4a515c;
+  transition: background 140ms ease;
+}
+
+.reload-toggle span::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f3f5f7;
+  transition: transform 140ms ease;
+}
+
+.reload-toggle input:checked + span {
+  background: #25c15f;
+}
+
+.reload-toggle input:checked + span::after {
+  transform: translateX(18px);
+}
+
+.reload-toggle input:focus-visible + span {
+  outline: 2px solid #8fd9aa;
+  outline-offset: 2px;
 }
 
 .buttons {

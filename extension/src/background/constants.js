@@ -3,7 +3,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   diagnosticsEnabled: false,
   apiBaseUrl: "http://localhost:8010",
   pageAutoReloadEnabled: false,
-  pageAutoReloadSeconds: 60
+  pageAutoReloadSeconds: 60,
+  preparationEnabled: false,
+  preparationBet: 1,
+  preparationCashout: 2
 });
 
 export const STORAGE_KEYS = Object.freeze({
@@ -11,7 +14,8 @@ export const STORAGE_KEYS = Object.freeze({
   resultQueue: "resultQueue",
   sampleQueue: "sampleQueue",
   stats: "stats",
-  collectorFrames: "collectorFrames"
+  collectorFrames: "collectorFrames",
+  preparationFrames: "preparationFrames"
 });
 
 export const MAX_RESULT_QUEUE_SIZE = 5000;

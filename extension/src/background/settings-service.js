@@ -2,6 +2,10 @@ import { DEFAULT_SETTINGS, STORAGE_KEYS } from "./constants.js";
 
 const MIN_AUTO_RELOAD_SECONDS = 5;
 const MAX_AUTO_RELOAD_SECONDS = 86_400;
+const MIN_PREPARATION_BET = 0.01;
+const MAX_PREPARATION_BET = 999_999_999;
+const MIN_PREPARATION_CASHOUT = 1.01;
+const MAX_PREPARATION_CASHOUT = 1_000_000;
 
 export async function getSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.settings);
@@ -46,6 +50,24 @@ export function normalizeAutoReloadSeconds(value) {
   );
 }
 
+export function normalizePreparationBet(value) {
+  return normalizeDecimal(
+    value,
+    MIN_PREPARATION_BET,
+    MAX_PREPARATION_BET,
+    DEFAULT_SETTINGS.preparationBet
+  );
+}
+
+export function normalizePreparationCashout(value) {
+  return normalizeDecimal(
+    value,
+    MIN_PREPARATION_CASHOUT,
+    MAX_PREPARATION_CASHOUT,
+    DEFAULT_SETTINGS.preparationCashout
+  );
+}
+
 function sanitizeSettings(value) {
   const settings = {
     ...DEFAULT_SETTINGS,
@@ -59,7 +81,21 @@ function sanitizeSettings(value) {
   settings.pageAutoReloadSeconds = normalizeAutoReloadSeconds(
     settings.pageAutoReloadSeconds
   );
+  settings.preparationEnabled = Boolean(settings.preparationEnabled);
+  settings.preparationBet = normalizePreparationBet(settings.preparationBet);
+  settings.preparationCashout = normalizePreparationCashout(
+    settings.preparationCashout
+  );
   settings.apiBaseUrl = normalizeApiBaseUrl(settings.apiBaseUrl);
 
   return settings;
+}
+
+function normalizeDecimal(value, minimum, maximum, fallback) {
+  const parsed = Number(String(value).trim().replace(",", "."));
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Number(Math.min(maximum, Math.max(minimum, parsed)).toFixed(2));
 }
