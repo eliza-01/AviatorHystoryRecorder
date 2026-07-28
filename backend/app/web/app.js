@@ -16,6 +16,7 @@
   const chartCanvas = document.getElementById("chart-canvas");
   const chart = document.getElementById("result-chart");
   const chartYAxis = document.getElementById("chart-y-axis");
+  const crosshairYValue = document.getElementById("crosshair-y-value");
   const chartXAxis = document.getElementById("chart-x-axis");
   const chartAxisCorner = document.getElementById("chart-axis-corner");
   const manualLinesLayer = document.getElementById("manual-lines-layer");
@@ -91,12 +92,7 @@
   });
   crosshairEnabled.addEventListener("change", () => {
     saveInterfaceSettings();
-    if (!crosshairEnabled.checked) {
-      const horizontalHoverLine = chart.querySelector("#hover-horizontal-line");
-      if (horizontalHoverLine) {
-        setElementHidden(horizontalHoverLine, true);
-      }
-    }
+    syncCrosshairMode();
   });
   addHorizontalLineButton.addEventListener("click", () => {
     setLinePlacementMode(!linePlacementMode);
@@ -113,6 +109,7 @@
   });
   chartViewport.addEventListener("scroll", () => {
     tooltip.hidden = true;
+    setElementHidden(crosshairYValue, true);
     scheduleStickyAxesRender();
   });
 
@@ -125,6 +122,7 @@
     }, 120);
   });
 
+  syncCrosshairMode();
   configureAutoRefresh();
   loadAnalysis();
 
@@ -275,6 +273,7 @@
 
     const previousScroll = captureScrollState();
     tooltip.hidden = true;
+    setElementHidden(crosshairYValue, true);
     chart.innerHTML = "";
 
     if (!Array.isArray(points) || points.length === 0) {
@@ -448,56 +447,57 @@
     const hoverLine = chart.querySelector("#hover-line");
     const horizontalHoverLine = chart.querySelector("#hover-horizontal-line");
     const hoverDot = chart.querySelector("#hover-dot");
+    const pointHoverRadius = 10;
 
     overlay.addEventListener("pointermove", (event) => {
       const svgRect = chart.getBoundingClientRect();
-      const localX = event.clientX - svgRect.left;
+      const localX = clamp(
+        event.clientX - svgRect.left,
+        margin.left,
+        width - margin.right
+      );
+      const localY = clamp(
+        event.clientY - svgRect.top,
+        margin.top,
+        height - margin.bottom
+      );
       const targetIndex = minX + ((localX - margin.left) / plotWidth) * xRange;
       const point = findNearestPoint(points, targetIndex);
-      const px = xScale(point.index);
-      const py = yScale(point.balance);
+      const pointX = xScale(point.index);
+      const pointY = yScale(point.balance);
+      const freeCrosshair = crosshairEnabled.checked;
 
+      const verticalX = freeCrosshair ? localX : pointX;
       setElementHidden(hoverLine, false);
-      hoverLine.setAttribute("x1", px);
-      hoverLine.setAttribute("x2", px);
+      hoverLine.setAttribute("x1", verticalX);
+      hoverLine.setAttribute("x2", verticalX);
       hoverLine.setAttribute("y1", margin.top);
       hoverLine.setAttribute("y2", height - margin.bottom);
 
-      if (crosshairEnabled.checked) {
+      if (freeCrosshair) {
         setElementHidden(horizontalHoverLine, false);
         horizontalHoverLine.setAttribute("x1", margin.left);
         horizontalHoverLine.setAttribute("x2", width - margin.right);
-        horizontalHoverLine.setAttribute("y1", py);
-        horizontalHoverLine.setAttribute("y2", py);
+        horizontalHoverLine.setAttribute("y1", localY);
+        horizontalHoverLine.setAttribute("y2", localY);
+        showCrosshairYValue(localY);
       } else {
         setElementHidden(horizontalHoverLine, true);
+        setElementHidden(crosshairYValue, true);
       }
 
-      setElementHidden(hoverDot, false);
-      hoverDot.setAttribute("cx", px);
-      hoverDot.setAttribute("cy", py);
+      const isPointHovered = !freeCrosshair ||
+        Math.hypot(pointX - localX, pointY - localY) <= pointHoverRadius;
 
-      tooltip.hidden = false;
-      tooltip.innerHTML =
-        `<strong>Раунд ${formatNumber(point.index)}</strong>` +
-        `Multiplier: ${formatNumber(point.multiplier)}x<br>` +
-        `Изменение: ${formatSigned(point.delta)}<br>` +
-        `Баланс: ${formatSigned(point.balance)}<br>` +
-        `${escapeXml(formatDate(point.occurred_at))}`;
-
-      const viewportRect = chartViewport.getBoundingClientRect();
-      const tooltipWidth = tooltip.offsetWidth || 190;
-      const tooltipHeight = tooltip.offsetHeight || 110;
-      let left = event.clientX - viewportRect.left + 12;
-      let top = event.clientY - viewportRect.top - tooltipHeight / 2;
-
-      if (left + tooltipWidth > chartViewport.clientWidth - 8) {
-        left = event.clientX - viewportRect.left - tooltipWidth - 12;
+      if (isPointHovered) {
+        setElementHidden(hoverDot, false);
+        hoverDot.setAttribute("cx", pointX);
+        hoverDot.setAttribute("cy", pointY);
+        showPointTooltip(point, event);
+      } else {
+        setElementHidden(hoverDot, true);
+        tooltip.hidden = true;
       }
-      left = Math.max(8, left);
-      top = Math.max(8, Math.min(top, chartViewport.clientHeight - tooltipHeight - 8));
-      tooltip.style.left = `${left}px`;
-      tooltip.style.top = `${top}px`;
     });
 
     overlay.addEventListener("click", (event) => {
@@ -522,9 +522,81 @@
     overlay.addEventListener("pointerleave", () => {
       setElementHidden(hoverLine, true);
       setElementHidden(horizontalHoverLine, true);
+      setElementHidden(crosshairYValue, true);
       setElementHidden(hoverDot, true);
       tooltip.hidden = true;
     });
+  }
+
+  function showPointTooltip(point, event) {
+    tooltip.hidden = false;
+    tooltip.innerHTML =
+      `<strong>Раунд ${formatNumber(point.index)}</strong>` +
+      `Multiplier: ${formatNumber(point.multiplier)}x<br>` +
+      `Изменение: ${formatSigned(point.delta)}<br>` +
+      `Баланс: ${formatSigned(point.balance)}<br>` +
+      `${escapeXml(formatDate(point.occurred_at))}`;
+
+    const viewportRect = chartViewport.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth || 190;
+    const tooltipHeight = tooltip.offsetHeight || 110;
+    let left = event.clientX - viewportRect.left + 12;
+    let top = event.clientY - viewportRect.top - tooltipHeight / 2;
+
+    if (left + tooltipWidth > chartViewport.clientWidth - 8) {
+      left = event.clientX - viewportRect.left - tooltipWidth - 12;
+    }
+    left = Math.max(8, left);
+    top = Math.max(8, Math.min(top, chartViewport.clientHeight - tooltipHeight - 8));
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  function showCrosshairYValue(contentY) {
+    if (!currentAxisModel || !crosshairEnabled.checked) {
+      setElementHidden(crosshairYValue, true);
+      return;
+    }
+
+    const {
+      margin,
+      minY,
+      maxY,
+      yRange,
+      plotHeight
+    } = currentAxisModel;
+    const plotPosition = clamp(
+      (contentY - margin.top) / plotHeight,
+      0,
+      1
+    );
+    const value = normalizeFloatingPoint(
+      clamp(maxY - plotPosition * yRange, minY, maxY)
+    );
+    const viewportY = contentY - chartViewport.scrollTop;
+    const axisHeight = Math.max(chartViewport.clientHeight - margin.bottom, 1);
+
+    if (viewportY < 0 || viewportY > axisHeight) {
+      setElementHidden(crosshairYValue, true);
+      return;
+    }
+
+    crosshairYValue.textContent = formatNumber(Math.round(value));
+    crosshairYValue.style.width = `${margin.left}px`;
+    crosshairYValue.style.top = `${viewportY}px`;
+    setElementHidden(crosshairYValue, false);
+  }
+
+  function syncCrosshairMode() {
+    chartWrap.classList.toggle("is-crosshair-active", crosshairEnabled.checked);
+
+    if (!crosshairEnabled.checked) {
+      const horizontalHoverLine = chart.querySelector("#hover-horizontal-line");
+      if (horizontalHoverLine) {
+        setElementHidden(horizontalHoverLine, true);
+      }
+      setElementHidden(crosshairYValue, true);
+    }
   }
 
   function captureScrollState() {

@@ -571,6 +571,7 @@ button:disabled {
   pointer-events: auto;
 }
 
+.chart-wrap.is-crosshair-active #chart-overlay,
 .chart-wrap.is-line-placement #chart-overlay {
   cursor: crosshair;
 }
@@ -730,6 +731,43 @@ button:disabled {
   top: 0;
   left: 0;
   border-right: 1px solid var(--border);
+}
+
+.crosshair-y-value {
+  position: absolute;
+  z-index: 13;
+  left: 0;
+  display: flex;
+  height: 24px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 8px 0 4px;
+  border-right: 2px solid var(--accent);
+  background: rgba(139, 92, 246, 0.94);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.crosshair-y-value::after {
+  position: absolute;
+  top: 50%;
+  right: -6px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 5px solid var(--accent);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.crosshair-y-value[hidden] {
+  display: none;
 }
 
 .chart-x-axis {
