@@ -438,7 +438,7 @@
       }
       return {
         id: typeof line?.id === "string" && line.id ? line.id : createManualLineId(),
-        value
+        value: normalizeManualLineValue(value)
       };
     });
   }
@@ -495,7 +495,12 @@
       autoRefresh: autoRefreshEnabled,
       crosshairEnabled: crosshairEnabled.checked,
       presets,
-      manualLines
+      manualLines: manualLines
+        .map((line) => ({
+          id: line.id,
+          value: normalizeManualLineValue(line.value)
+        }))
+        .filter((line) => line.value !== null)
     };
   }
 
@@ -878,8 +883,8 @@
 
     const balances = points.map((point) => Number(point.balance));
     const manualLineValues = manualLines
-      .map((line) => Number(line.value))
-      .filter(Number.isFinite);
+      .map((line) => normalizeManualLineValue(line.value))
+      .filter((value) => value !== null);
     const dataMinY = Math.min(0, ...balances, ...manualLineValues);
     const dataMaxY = Math.max(0, ...balances, ...manualLineValues);
     const yTickStep = options.balanceTickStep > 0
@@ -1014,7 +1019,28 @@
     const pointHoverRadius = 10;
 
     overlay.addEventListener("pointerdown", (event) => {
+      if (event.button === 1) {
+        event.preventDefault();
+        event.stopPropagation();
+        crosshairEnabled.checked = !crosshairEnabled.checked;
+        crosshairEnabled.dispatchEvent(new Event("change", { bubbles: true }));
+        return;
+      }
+
       beginChartPan(event, overlay);
+    });
+
+    overlay.addEventListener("mousedown", (event) => {
+      if (event.button === 1) {
+        event.preventDefault();
+      }
+    });
+
+    overlay.addEventListener("auxclick", (event) => {
+      if (event.button === 1) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     });
 
     overlay.addEventListener("pointermove", (event) => {
@@ -1039,7 +1065,9 @@
       const pointY = yScale(point.balance);
       const freeCrosshair = crosshairEnabled.checked;
 
-      const verticalX = freeCrosshair ? localX : pointX;
+      // Вертикальная линия всегда привязана к ближайшей точке графика:
+      // один шаг соответствует одному результату.
+      const verticalX = pointX;
       setElementHidden(hoverLine, false);
       hoverLine.setAttribute("x1", verticalX);
       hoverLine.setAttribute("x2", verticalX);
@@ -1088,7 +1116,9 @@
         return;
       }
 
-      const value = chartValueFromClientY(event.clientY);
+      const value = normalizeManualLineValue(
+        chartValueFromClientY(event.clientY)
+      );
       if (value === null) {
         return;
       }
@@ -1515,7 +1545,11 @@
 
     const rows = [];
     for (const line of manualLines) {
-      const value = clamp(Number(line.value), minY, maxY);
+      const normalizedValue = normalizeManualLineValue(line.value);
+      if (normalizedValue === null) {
+        continue;
+      }
+      const value = clamp(normalizedValue, minY, maxY);
       const contentY =
         margin.top + ((maxY - value) / yRange) * plotHeight;
       const viewportY = contentY - chartViewport.scrollTop;
@@ -1612,7 +1646,12 @@
       return;
     }
 
-    line.value = value;
+    const normalizedValue = normalizeManualLineValue(value);
+    if (normalizedValue === null || normalizedValue === line.value) {
+      return;
+    }
+
+    line.value = normalizedValue;
     renderManualLinesOverlay();
   }
 
@@ -1746,9 +1785,9 @@
           .slice(0, 50)
           .map((line) => ({
             id: typeof line?.id === "string" ? line.id : createManualLineId(),
-            value: Number(line?.value)
+            value: normalizeManualLineValue(line?.value)
           }))
-          .filter((line) => Number.isFinite(line.value));
+          .filter((line) => line.value !== null);
       }
     } catch (_error) {
       // Повреждённые или недоступные локальные настройки не мешают работе страницы.
@@ -1894,6 +1933,14 @@
     }
 
     return niceFraction * magnitude;
+  }
+
+  function normalizeManualLineValue(value) {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return null;
+    }
+    return Math.round(numericValue);
   }
 
   function normalizeFloatingPoint(value) {
