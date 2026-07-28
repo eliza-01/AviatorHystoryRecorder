@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aviator — анализ результатов</title>
-  <link rel="stylesheet" href="/assets/app.css?v=20260728.2">
+  <link rel="stylesheet" href="/assets/app.css?v=20260728.3">
 </head>
 <body>
   <main class="page-shell">
@@ -83,9 +83,15 @@
 
     <section class="chart-section" aria-labelledby="chart-title">
       <div class="section-heading">
-        <div>
+        <div class="chart-heading-copy">
           <h2 id="chart-title">Накопительный результат</h2>
           <p id="chart-caption">Ожидание данных…</p>
+          <div
+            id="recent-results"
+            class="recent-results"
+            aria-label="Последние результаты"
+            hidden
+          ></div>
         </div>
         <div class="chart-heading-actions">
           <div class="chart-legend">
@@ -177,6 +183,6 @@
     <div class="error-box" id="error-box" role="alert" hidden></div>
   </main>
 
-  <script src="/assets/app.js?v=20260728.2" defer></script>
+  <script src="/assets/app.js?v=20260728.3" defer></script>
 </body>
 </html>

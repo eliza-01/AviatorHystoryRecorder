@@ -11,6 +11,9 @@
   --positive: #29c779;
   --negative: #ff6675;
   --manual-line: #f59e0b;
+  --result-low: #19bfe8;
+  --result-medium: #9b5cf6;
+  --result-high: #ec3cc7;
   --grid: rgba(156, 166, 181, 0.18);
   --zero: rgba(243, 245, 247, 0.62);
 }
@@ -245,6 +248,49 @@ button:disabled {
 .chart-caption {
   margin-bottom: 0;
   font-size: 14px;
+}
+
+.chart-heading-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.recent-results {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  padding: 3px 0 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-color: var(--border) transparent;
+  scrollbar-width: thin;
+  white-space: nowrap;
+}
+
+.recent-results[hidden] {
+  display: none;
+}
+
+.recent-result {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.recent-result-low {
+  color: var(--result-low);
+}
+
+.recent-result-medium {
+  color: var(--result-medium);
+}
+
+.recent-result-high {
+  color: var(--result-high);
 }
 
 .chart-heading-actions {
@@ -609,6 +655,10 @@ button:disabled {
   .page-header,
   .section-heading {
     display: grid;
+  }
+
+  .chart-heading-copy {
+    width: 100%;
   }
 
   .chart-heading-actions {

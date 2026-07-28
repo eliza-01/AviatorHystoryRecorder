@@ -11,6 +11,7 @@
   const connectionStatus = document.getElementById("connection-status");
   const lastUpdate = document.getElementById("last-update");
   const chartCaption = document.getElementById("chart-caption");
+  const recentResults = document.getElementById("recent-results");
   const chartWrap = document.getElementById("chart-wrap");
   const chartViewport = document.getElementById("chart-viewport");
   const chartCanvas = document.getElementById("chart-canvas");
@@ -48,6 +49,7 @@
     timeStyle: "medium"
   });
   const SETTINGS_STORAGE_KEY = "aviator-analysis-interface-v1";
+  const RECENT_RESULTS_LIMIT = 15;
 
   let latestResponse = null;
   let activeController = null;
@@ -232,6 +234,7 @@
   function render(data, { preserveScroll }) {
     const options = readChartOptions() || lastChartOptions;
     renderStats(data.stats);
+    renderRecentResults(data.points);
     renderChart(data.points, { preserveScroll });
     updateChartCaption(data.stats, options);
   }
@@ -246,6 +249,42 @@
       `Показаны все ${formatNumber(stats.total)} результатов. ` +
       `В окне: ${formatNumber(options.visibleResults)} результатов × ` +
       `${formatNumber(options.visibleHeight)} пунктов; остальное доступно прокруткой.`;
+  }
+
+  function renderRecentResults(points) {
+    if (!Array.isArray(points) || points.length === 0) {
+      recentResults.innerHTML = "";
+      recentResults.hidden = true;
+      return;
+    }
+
+    const latestPoints = points
+      .slice(-RECENT_RESULTS_LIMIT)
+      .reverse();
+
+    recentResults.innerHTML = latestPoints
+      .map((point) => {
+        const multiplier = Number(point.multiplier);
+        if (!Number.isFinite(multiplier)) {
+          return "";
+        }
+
+        let levelClass = "recent-result-low";
+        if (multiplier >= 10) {
+          levelClass = "recent-result-high";
+        } else if (multiplier >= 2) {
+          levelClass = "recent-result-medium";
+        }
+
+        return (
+          `<span class="recent-result ${levelClass}" ` +
+          `title="${escapeXml(formatRecentMultiplier(multiplier))}x">` +
+          `${escapeXml(formatRecentMultiplier(multiplier))}x</span>`
+        );
+      })
+      .join("");
+    recentResults.hidden = false;
+    recentResults.scrollLeft = 0;
   }
 
   function renderStats(stats) {
@@ -1092,6 +1131,13 @@
   function hideError() {
     errorBox.hidden = true;
     errorBox.textContent = "";
+  }
+
+  function formatRecentMultiplier(value) {
+    return new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(Number(value));
   }
 
   function formatNumber(value) {
