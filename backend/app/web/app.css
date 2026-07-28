@@ -629,6 +629,7 @@ button:disabled {
   min-width: 0;
   height: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
   scrollbar-color: var(--border) var(--panel-soft);
   scrollbar-width: thin;
 }
@@ -641,7 +642,14 @@ button:disabled {
 #result-chart {
   display: block;
   max-width: none;
-  touch-action: auto;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+#chart-overlay {
+  cursor: grab;
+  touch-action: none;
 }
 
 .chart-empty {
@@ -866,6 +874,13 @@ button:disabled {
 .chart-wrap.is-crosshair-active #chart-overlay,
 .chart-wrap.is-line-placement #chart-overlay {
   cursor: crosshair;
+}
+
+.chart-wrap.is-panning,
+.chart-wrap.is-panning * {
+  cursor: grabbing !important;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .chart-wrap.is-dragging-line,

@@ -56,6 +56,7 @@
   const SETTINGS_STORAGE_KEY = "aviator-analysis-interface-v1";
   const RECENT_RESULTS_LIMIT = 15;
   const PRESETS_LIMIT = 30;
+  const CHART_PAN_THRESHOLD = 4;
 
   let latestResponse = null;
   let activeController = null;
@@ -69,6 +70,9 @@
   let presets = [];
   let linePlacementMode = false;
   let activeLineDragId = null;
+  let chartPanState = null;
+  let chartPanFrame = null;
+  let suppressNextChartClick = false;
   let lastChartOptions = {
     visibleResults: 100,
     visibleHeight: 50
@@ -471,6 +475,7 @@
     const options = readChartOptions() || lastChartOptions;
 
     const previousScroll = captureScrollState();
+    cancelChartPan();
     tooltip.hidden = true;
     setElementHidden(crosshairYValue, true);
     chart.innerHTML = "";
@@ -648,7 +653,15 @@
     const hoverDot = chart.querySelector("#hover-dot");
     const pointHoverRadius = 10;
 
+    overlay.addEventListener("pointerdown", (event) => {
+      beginChartPan(event, overlay);
+    });
+
     overlay.addEventListener("pointermove", (event) => {
+      if (updateChartPan(event)) {
+        return;
+      }
+
       const svgRect = chart.getBoundingClientRect();
       const localX = clamp(
         event.clientX - svgRect.left,
@@ -699,7 +712,18 @@
       }
     });
 
+    overlay.addEventListener("pointerup", finishChartPan);
+    overlay.addEventListener("pointercancel", finishChartPan);
+    overlay.addEventListener("lostpointercapture", finishChartPan);
+
     overlay.addEventListener("click", (event) => {
+      if (suppressNextChartClick) {
+        suppressNextChartClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       if (!linePlacementMode || !currentAxisModel) {
         return;
       }
@@ -719,12 +743,166 @@
     });
 
     overlay.addEventListener("pointerleave", () => {
+      if (chartPanState?.active) {
+        return;
+      }
+
       setElementHidden(hoverLine, true);
       setElementHidden(horizontalHoverLine, true);
       setElementHidden(crosshairYValue, true);
       setElementHidden(hoverDot, true);
       tooltip.hidden = true;
     });
+  }
+
+  function beginChartPan(event, overlay) {
+    if (
+      event.button !== 0 ||
+      event.isPrimary === false ||
+      linePlacementMode ||
+      activeLineDragId !== null
+    ) {
+      return;
+    }
+
+    cancelChartPan();
+    suppressNextChartClick = false;
+    chartPanState = {
+      pointerId: event.pointerId,
+      overlay,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      latestClientX: event.clientX,
+      latestClientY: event.clientY,
+      startScrollLeft: chartViewport.scrollLeft,
+      startScrollTop: chartViewport.scrollTop,
+      active: false
+    };
+
+    try {
+      overlay.setPointerCapture(event.pointerId);
+    } catch (_error) {
+      // Pointer capture может быть недоступен в старых браузерах.
+    }
+
+    event.preventDefault();
+  }
+
+  function updateChartPan(event) {
+    const state = chartPanState;
+    if (!state || event.pointerId !== state.pointerId) {
+      return false;
+    }
+
+    state.latestClientX = event.clientX;
+    state.latestClientY = event.clientY;
+    const deltaX = event.clientX - state.startClientX;
+    const deltaY = event.clientY - state.startClientY;
+
+    if (!state.active && Math.hypot(deltaX, deltaY) >= CHART_PAN_THRESHOLD) {
+      state.active = true;
+      suppressNextChartClick = true;
+      chartWrap.classList.add("is-panning");
+      hideChartHover();
+    }
+
+    if (!state.active) {
+      return false;
+    }
+
+    event.preventDefault();
+    scheduleChartPanFrame();
+    return true;
+  }
+
+  function scheduleChartPanFrame() {
+    if (chartPanFrame !== null) {
+      return;
+    }
+
+    chartPanFrame = requestAnimationFrame(() => {
+      chartPanFrame = null;
+      applyChartPanPosition();
+    });
+  }
+
+  function applyChartPanPosition() {
+    const state = chartPanState;
+    if (!state?.active) {
+      return;
+    }
+
+    chartViewport.scrollLeft = state.startScrollLeft -
+      (state.latestClientX - state.startClientX);
+    chartViewport.scrollTop = state.startScrollTop -
+      (state.latestClientY - state.startClientY);
+  }
+
+  function finishChartPan(event) {
+    const state = chartPanState;
+    if (!state || (event?.pointerId !== undefined && event.pointerId !== state.pointerId)) {
+      return;
+    }
+
+    if (chartPanFrame !== null) {
+      cancelAnimationFrame(chartPanFrame);
+      chartPanFrame = null;
+    }
+    applyChartPanPosition();
+
+    const wasActive = state.active;
+    chartPanState = null;
+    chartWrap.classList.remove("is-panning");
+
+    try {
+      if (state.overlay.hasPointerCapture?.(state.pointerId)) {
+        state.overlay.releasePointerCapture(state.pointerId);
+      }
+    } catch (_error) {
+      // Захват уже мог быть снят браузером.
+    }
+
+    if (wasActive) {
+      hideChartHover();
+      scheduleStickyAxesRender();
+      setTimeout(() => {
+        suppressNextChartClick = false;
+      }, 0);
+    } else {
+      suppressNextChartClick = false;
+    }
+  }
+
+  function cancelChartPan() {
+    const state = chartPanState;
+    if (chartPanFrame !== null) {
+      cancelAnimationFrame(chartPanFrame);
+      chartPanFrame = null;
+    }
+
+    chartPanState = null;
+    suppressNextChartClick = false;
+    chartWrap.classList.remove("is-panning");
+
+    if (!state) {
+      return;
+    }
+
+    try {
+      if (state.overlay.hasPointerCapture?.(state.pointerId)) {
+        state.overlay.releasePointerCapture(state.pointerId);
+      }
+    } catch (_error) {
+      // SVG мог быть уже перерисован.
+    }
+  }
+
+  function hideChartHover() {
+    setElementHidden(chart.querySelector("#hover-line"), true);
+    setElementHidden(chart.querySelector("#hover-horizontal-line"), true);
+    setElementHidden(chart.querySelector("#hover-dot"), true);
+    setElementHidden(crosshairYValue, true);
+    tooltip.hidden = true;
   }
 
   function showPointTooltip(point, event) {
@@ -1301,6 +1479,9 @@
   }
 
   function setElementHidden(element, hidden) {
+    if (!element) {
+      return;
+    }
     element.toggleAttribute("hidden", hidden);
   }
 
