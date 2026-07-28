@@ -76,9 +76,9 @@
 
   restoreInterfaceSettings();
   renderPresets();
-  enableWheelNumberInput(thresholdInput, { decimals: 2 });
-  enableWheelNumberInput(visibleResultsInput, { decimals: 0 });
-  enableWheelNumberInput(visibleHeightInput, { decimals: 0 });
+  enableWheelNumberInput(thresholdInput, { decimals: 2, ctrlStep: 10 });
+  enableWheelNumberInput(visibleResultsInput, { decimals: 0, ctrlStep: 100 });
+  enableWheelNumberInput(visibleHeightInput, { decimals: 0, ctrlStep: 50 });
 
   calculateButton.addEventListener("click", () => {
     saveInterfaceSettings();
@@ -1095,7 +1095,7 @@
     return `line-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
-  function enableWheelNumberInput(input, { decimals }) {
+  function enableWheelNumberInput(input, { decimals, ctrlStep }) {
     input.addEventListener(
       "wheel",
       (event) => {
@@ -1113,7 +1113,8 @@
         const fallbackValue = Number.isFinite(min) ? min : 0;
         const currentValue = Number.isFinite(parsedValue) ? parsedValue : fallbackValue;
         const direction = event.deltaY < 0 ? 1 : -1;
-        const nextValue = clamp(currentValue + direction * 1.0, min, max);
+        const step = event.ctrlKey ? ctrlStep : 1.0;
+        const nextValue = clamp(currentValue + direction * step, min, max);
 
         input.value = decimals > 0
           ? normalizeFloatingPoint(nextValue).toFixed(decimals)
