@@ -5,6 +5,12 @@
   const visibleResultsInput = document.getElementById("visible-results-input");
   const visibleHeightInput = document.getElementById("visible-height-input");
   const balanceTickStepInput = document.getElementById("balance-tick-step-input");
+  const utcOffsetInput = document.getElementById("utc-offset-input");
+  const utcOffsetLabel = document.getElementById("utc-offset-label");
+  const exportSettingsButton = document.getElementById("export-settings-button");
+  const importSettingsButton = document.getElementById("import-settings-button");
+  const importSettingsInput = document.getElementById("import-settings-input");
+  const settingsMigrationStatus = document.getElementById("settings-migration-status");
   const calculateButton = document.getElementById("calculate-button");
   const autoRefresh = document.getElementById("auto-refresh");
   const crosshairEnabled = document.getElementById("crosshair-enabled");
@@ -50,17 +56,28 @@
     minimumFractionDigits: 1,
     maximumFractionDigits: 1
   });
-  const dateFormatter = new Intl.DateTimeFormat("ru-RU", {
+  const graphPointDateFormatter = new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "short",
+    timeStyle: "medium",
+    timeZone: "UTC"
+  });
+  const localDateFormatter = new Intl.DateTimeFormat("ru-RU", {
     dateStyle: "short",
     timeStyle: "medium"
   });
   const SETTINGS_STORAGE_KEY = "aviator-analysis-interface-v1";
+  const SETTINGS_EXPORT_FORMAT = "aviator-analysis-settings";
+  const SETTINGS_EXPORT_VERSION = 1;
+  const SETTINGS_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
   const RECENT_RESULTS_LIMIT = 15;
   const PRESETS_LIMIT = 30;
   const CHART_PAN_THRESHOLD = 4;
 
   let latestResponse = null;
   let activeController = null;
+  let utcOffsetHours = getBrowserUtcOffsetHours();
+  let lastUpdateAt = null;
+  let migrationStatusTimer = null;
   let autoRefreshTimer = null;
   let autoRefreshEnabled = true;
   let resizeTimer = null;
@@ -81,7 +98,9 @@
     balanceTickStep: 0
   };
 
+  utcOffsetInput.value = formatUtcOffsetInput(utcOffsetHours);
   restoreInterfaceSettings();
+  syncUtcOffsetControl();
   syncAutoRefreshButton();
   renderPresets();
   enableWheelNumberInput(thresholdInput, { decimals: 2, ctrlStep: 10 });
@@ -110,6 +129,14 @@
     saveInterfaceSettings();
     scheduleLocalChartRender();
   });
+  utcOffsetInput.addEventListener("input", handleUtcOffsetInput);
+  utcOffsetInput.addEventListener("change", handleUtcOffsetCommit);
+  exportSettingsButton.addEventListener("click", exportInterfaceSettings);
+  importSettingsButton.addEventListener("click", () => {
+    importSettingsInput.value = "";
+    importSettingsInput.click();
+  });
+  importSettingsInput.addEventListener("change", importInterfaceSettings);
   autoRefresh.addEventListener("click", () => {
     autoRefreshEnabled = !autoRefreshEnabled;
     syncAutoRefreshButton();
@@ -185,6 +212,302 @@
     if (event.key === "Enter") {
       renderCurrentChart({ preserveScroll: false });
     }
+  }
+
+  function handleUtcOffsetInput() {
+    const parsedOffset = parseUtcOffset(utcOffsetInput.value);
+    if (parsedOffset === null) {
+      utcOffsetLabel.textContent = "Допустимо от UTC−12:00 до UTC+14:00";
+      return;
+    }
+
+    utcOffsetHours = parsedOffset;
+    syncUtcOffsetControl({ normalizeInput: false });
+    saveInterfaceSettings();
+    hideChartHover();
+  }
+
+  function handleUtcOffsetCommit() {
+    const parsedOffset = parseUtcOffset(utcOffsetInput.value);
+    if (parsedOffset === null) {
+      utcOffsetInput.value = formatUtcOffsetInput(utcOffsetHours);
+    } else {
+      utcOffsetHours = parsedOffset;
+    }
+
+    syncUtcOffsetControl();
+    saveInterfaceSettings();
+    hideChartHover();
+  }
+
+  function syncUtcOffsetControl({ normalizeInput = true } = {}) {
+    if (normalizeInput) {
+      utcOffsetInput.value = formatUtcOffsetInput(utcOffsetHours);
+    }
+
+    const label = formatUtcOffsetLabel(utcOffsetHours);
+    utcOffsetLabel.textContent = `Время точек: сервер + ${label}`;
+    utcOffsetInput.setAttribute("aria-valuetext", label);
+  }
+
+  function exportInterfaceSettings() {
+    const snapshot = createValidatedSettingsSnapshot();
+    if (!snapshot) {
+      return;
+    }
+
+    const bundle = {
+      format: SETTINGS_EXPORT_FORMAT,
+      version: SETTINGS_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      settings: snapshot
+    };
+    const json = `${JSON.stringify(bundle, null, 2)}\n`;
+    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+
+    link.href = url;
+    link.download = `aviator-settings-${timestamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+
+    showSettingsMigrationStatus(
+      `Настройки скачаны: ${formatNumber(snapshot.presets.length)} пресетов.`,
+      false
+    );
+  }
+
+  async function importInterfaceSettings(event) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      if (file.size > SETTINGS_IMPORT_MAX_BYTES) {
+        throw new Error("Файл настроек слишком большой. Максимальный размер — 2 МБ.");
+      }
+
+      const parsed = JSON.parse(await file.text());
+      const source = extractImportedSettings(parsed);
+      const snapshot = normalizeImportedSettings(source);
+      applyImportedSettings(snapshot);
+      await loadAnalysis();
+      showSettingsMigrationStatus(
+        `Настройки загружены: ${formatNumber(presets.length)} пресетов.`,
+        false
+      );
+    } catch (error) {
+      showSettingsMigrationStatus(
+        `Не удалось загрузить настройки: ${error.message}`,
+        true
+      );
+    } finally {
+      importSettingsInput.value = "";
+    }
+  }
+
+  function extractImportedSettings(parsed) {
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("JSON должен содержать объект настроек.");
+    }
+
+    if ("format" in parsed && parsed.format !== SETTINGS_EXPORT_FORMAT) {
+      throw new Error("Это файл настроек другого формата.");
+    }
+    if ("version" in parsed) {
+      const version = Number(parsed.version);
+      if (!Number.isInteger(version) || version < 1 || version > SETTINGS_EXPORT_VERSION) {
+        throw new Error("Версия файла настроек не поддерживается.");
+      }
+    }
+
+    const source = parsed.settings ?? parsed;
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      throw new Error("В файле отсутствует раздел settings.");
+    }
+    return source;
+  }
+
+  function normalizeImportedSettings(settings) {
+    const threshold = parseThreshold(settings.threshold);
+    const visibleResults = parseIntegerInRange(settings.visibleResults, 2, 10_000);
+    const visibleHeight = parseIntegerInRange(settings.visibleHeight, 1, 1_000_000);
+    const balanceTickStep = parseBalanceTickStep(settings.balanceTickStep ?? 0);
+    const importedUtcOffset = parseUtcOffset(
+      settings.utcOffsetHours ?? settings.utcOffset ?? utcOffsetHours
+    );
+
+    if (threshold === null) {
+      throw new Error("Некорректное значение x.");
+    }
+    if (visibleResults === null) {
+      throw new Error("Некорректное количество результатов на графике.");
+    }
+    if (visibleHeight === null) {
+      throw new Error("Некорректная высота графика.");
+    }
+    if (balanceTickStep === null) {
+      throw new Error("Некорректный шаг меток баланса.");
+    }
+    if (importedUtcOffset === null) {
+      throw new Error("Некорректное смещение UTC.");
+    }
+
+    return {
+      threshold: threshold.toFixed(2),
+      visibleResults: String(visibleResults),
+      visibleHeight: String(visibleHeight),
+      balanceTickStep: formatInputNumber(balanceTickStep),
+      utcOffsetHours: importedUtcOffset,
+      autoRefresh: readImportedBoolean(settings, "autoRefresh", autoRefreshEnabled),
+      crosshairEnabled: readImportedBoolean(
+        settings,
+        "crosshairEnabled",
+        crosshairEnabled.checked
+      ),
+      presets: normalizeImportedPresets(settings.presets ?? []),
+      manualLines: normalizeImportedManualLines(settings.manualLines ?? [])
+    };
+  }
+
+  function readImportedBoolean(settings, key, fallback) {
+    if (!(key in settings)) {
+      return fallback;
+    }
+    if (typeof settings[key] !== "boolean") {
+      throw new Error(`Параметр ${key} должен быть логическим значением.`);
+    }
+    return settings[key];
+  }
+
+  function normalizeImportedPresets(rawPresets) {
+    if (!Array.isArray(rawPresets)) {
+      throw new Error("Список пресетов имеет неверный формат.");
+    }
+    if (rawPresets.length > PRESETS_LIMIT) {
+      throw new Error(`В файле больше ${PRESETS_LIMIT} пресетов.`);
+    }
+
+    return rawPresets.map((preset, index) => {
+      const name = typeof preset?.name === "string"
+        ? preset.name.trim().slice(0, 60)
+        : "";
+      const threshold = parseThreshold(preset?.threshold);
+      const visibleResults = parseIntegerInRange(preset?.visibleResults, 2, 10_000);
+      const visibleHeight = parseIntegerInRange(preset?.visibleHeight, 1, 1_000_000);
+      const balanceTickStep = parseBalanceTickStep(preset?.balanceTickStep ?? 0);
+
+      if (
+        !name ||
+        threshold === null ||
+        visibleResults === null ||
+        visibleHeight === null ||
+        balanceTickStep === null
+      ) {
+        throw new Error(`Некорректный пресет №${index + 1}.`);
+      }
+
+      return {
+        id: typeof preset?.id === "string" && preset.id ? preset.id : createPresetId(),
+        name,
+        threshold,
+        visibleResults,
+        visibleHeight,
+        balanceTickStep
+      };
+    });
+  }
+
+  function normalizeImportedManualLines(rawLines) {
+    if (!Array.isArray(rawLines)) {
+      throw new Error("Список горизонтальных линий имеет неверный формат.");
+    }
+    if (rawLines.length > 50) {
+      throw new Error("В файле больше 50 горизонтальных линий.");
+    }
+
+    return rawLines.map((line, index) => {
+      const value = Number(line?.value);
+      if (!Number.isFinite(value)) {
+        throw new Error(`Некорректная горизонтальная линия №${index + 1}.`);
+      }
+      return {
+        id: typeof line?.id === "string" && line.id ? line.id : createManualLineId(),
+        value
+      };
+    });
+  }
+
+  function applyImportedSettings(snapshot) {
+    thresholdInput.value = snapshot.threshold;
+    visibleResultsInput.value = snapshot.visibleResults;
+    visibleHeightInput.value = snapshot.visibleHeight;
+    balanceTickStepInput.value = snapshot.balanceTickStep;
+    utcOffsetHours = snapshot.utcOffsetHours;
+    autoRefreshEnabled = snapshot.autoRefresh;
+    crosshairEnabled.checked = snapshot.crosshairEnabled;
+    presets = snapshot.presets;
+    manualLines = snapshot.manualLines;
+
+    setLinePlacementMode(false);
+    syncUtcOffsetControl();
+    syncAutoRefreshButton();
+    configureAutoRefresh();
+    syncCrosshairMode();
+    renderPresets();
+    saveInterfaceSettings();
+    updateLastUpdateLabel();
+  }
+
+  function createValidatedSettingsSnapshot() {
+    const threshold = parseThreshold(thresholdInput.value);
+    const chartOptions = readChartOptions();
+    const parsedUtcOffset = parseUtcOffset(utcOffsetInput.value);
+
+    if (threshold === null || !chartOptions || parsedUtcOffset === null) {
+      showSettingsMigrationStatus(
+        "Сначала исправьте значения x, размеров графика, шага меток и UTC.",
+        true
+      );
+      return null;
+    }
+
+    thresholdInput.value = threshold.toFixed(2);
+    normalizeChartInputs(chartOptions);
+    utcOffsetHours = parsedUtcOffset;
+    syncUtcOffsetControl();
+    saveInterfaceSettings();
+    return getInterfaceSettingsSnapshot();
+  }
+
+  function getInterfaceSettingsSnapshot() {
+    return {
+      threshold: thresholdInput.value,
+      visibleResults: visibleResultsInput.value,
+      visibleHeight: visibleHeightInput.value,
+      balanceTickStep: balanceTickStepInput.value,
+      utcOffsetHours,
+      autoRefresh: autoRefreshEnabled,
+      crosshairEnabled: crosshairEnabled.checked,
+      presets,
+      manualLines
+    };
+  }
+
+  function showSettingsMigrationStatus(message, isError) {
+    clearTimeout(migrationStatusTimer);
+    settingsMigrationStatus.textContent = message;
+    settingsMigrationStatus.classList.toggle("is-error", isError);
+    settingsMigrationStatus.classList.toggle("is-success", !isError);
+    migrationStatusTimer = setTimeout(() => {
+      settingsMigrationStatus.textContent = "";
+      settingsMigrationStatus.classList.remove("is-error", "is-success");
+    }, 6000);
   }
 
   function scheduleLocalChartRender() {
@@ -365,6 +688,12 @@
       : "Автообновление выключено";
   }
 
+  function updateLastUpdateLabel() {
+    lastUpdate.textContent = lastUpdateAt
+      ? `Последнее обновление: ${formatLocalDate(lastUpdateAt)}`
+      : "Последнее обновление: —";
+  }
+
   async function loadAnalysis({ quiet = false } = {}) {
     const threshold = parseThreshold(thresholdInput.value);
     const chartOptions = readChartOptions();
@@ -408,7 +737,8 @@
       latestResponse = await response.json();
       render(latestResponse, { preserveScroll: quiet && chartHasRendered });
       setConnection(true);
-      lastUpdate.textContent = `Последнее обновление: ${dateFormatter.format(new Date())}`;
+      lastUpdateAt = new Date();
+      updateLastUpdateLabel();
     } catch (error) {
       if (error.name === "AbortError") {
         return;
@@ -942,7 +1272,7 @@
       `Multiplier: ${formatNumber(point.multiplier)}x<br>` +
       `Изменение: ${formatSigned(point.delta)}<br>` +
       `Баланс: ${formatSigned(point.balance)}<br>` +
-      `${escapeXml(formatDate(point.occurred_at))}`;
+      `${escapeXml(formatGraphPointDate(point.occurred_at))}`;
 
     const viewportRect = chartViewport.getBoundingClientRect();
     const tooltipWidth = tooltip.offsetWidth || 190;
@@ -1379,6 +1709,13 @@
       if (typeof settings.balanceTickStep === "string") {
         balanceTickStepInput.value = settings.balanceTickStep;
       }
+      const restoredUtcOffset = parseUtcOffset(
+        settings.utcOffsetHours ?? settings.utcOffset
+      );
+      if (restoredUtcOffset !== null) {
+        utcOffsetHours = restoredUtcOffset;
+        utcOffsetInput.value = formatUtcOffsetInput(utcOffsetHours);
+      }
       if (typeof settings.autoRefresh === "boolean") {
         autoRefreshEnabled = settings.autoRefresh;
       }
@@ -1422,16 +1759,7 @@
     try {
       localStorage.setItem(
         SETTINGS_STORAGE_KEY,
-        JSON.stringify({
-          threshold: thresholdInput.value,
-          visibleResults: visibleResultsInput.value,
-          visibleHeight: visibleHeightInput.value,
-          balanceTickStep: balanceTickStepInput.value,
-          autoRefresh: autoRefreshEnabled,
-          crosshairEnabled: crosshairEnabled.checked,
-          presets,
-          manualLines
-        })
+        JSON.stringify(getInterfaceSettingsSnapshot())
       );
     } catch (_error) {
       // В приватном режиме localStorage может быть недоступен.
@@ -1517,6 +1845,30 @@
     return Math.round(value * 10000) / 10000;
   }
 
+  function parseUtcOffset(rawValue) {
+    const normalized = String(rawValue ?? "").trim().replace(",", ".");
+    if (!normalized) {
+      return null;
+    }
+
+    const value = Number(normalized);
+    const quarterHours = Math.round(value * 4);
+    if (
+      !Number.isFinite(value) ||
+      value < -12 ||
+      value > 14 ||
+      Math.abs(value * 4 - quarterHours) > 1e-8
+    ) {
+      return null;
+    }
+    return normalizeFloatingPoint(quarterHours / 4);
+  }
+
+  function getBrowserUtcOffsetHours() {
+    const offset = -new Date().getTimezoneOffset() / 60;
+    return clamp(normalizeFloatingPoint(Math.round(offset * 4) / 4), -12, 14);
+  }
+
   function calculateNiceIntegerStep(rawStep) {
     return Math.max(1, Math.round(calculateNiceStep(rawStep)));
   }
@@ -1591,6 +1943,19 @@
     return String(normalizeFloatingPoint(Number(value) || 0));
   }
 
+  function formatUtcOffsetInput(value) {
+    return String(normalizeFloatingPoint(Number(value) || 0));
+  }
+
+  function formatUtcOffsetLabel(value) {
+    const totalMinutes = Math.round(Number(value) * 60);
+    const sign = totalMinutes >= 0 ? "+" : "-";
+    const absoluteMinutes = Math.abs(totalMinutes);
+    const hours = Math.floor(absoluteMinutes / 60);
+    const minutes = absoluteMinutes % 60;
+    return `UTC${sign}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  }
+
   function formatRecentMultiplier(value) {
     return new Intl.NumberFormat("en-US", {
       minimumFractionDigits: 2,
@@ -1619,9 +1984,60 @@
     return formatNumber(numeric);
   }
 
-  function formatDate(value) {
+  function formatGraphPointDate(value) {
+    const serverDate = parseServerTimestamp(value);
+    if (!serverDate) {
+      return "Время неизвестно";
+    }
+
+    const shiftedDate = new Date(
+      serverDate.getTime() + utcOffsetHours * 60 * 60 * 1000
+    );
+    return `${graphPointDateFormatter.format(shiftedDate)} · ${formatUtcOffsetLabel(utcOffsetHours)}`;
+  }
+
+  function parseServerTimestamp(value) {
+    const rawValue = String(value ?? "").trim();
+    const match = rawValue.match(
+      /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?(?:Z|[+-]\d{2}:?\d{2})?$/
+    );
+
+    if (match) {
+      const [, year, month, day, hours, minutes, seconds = "0", fraction = ""] = match;
+      const milliseconds = Number(`${fraction}000`.slice(0, 3));
+      const timestamp = Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hours),
+        Number(minutes),
+        Number(seconds),
+        milliseconds
+      );
+      const date = new Date(timestamp);
+
+      if (
+        date.getUTCFullYear() === Number(year) &&
+        date.getUTCMonth() === Number(month) - 1 &&
+        date.getUTCDate() === Number(day) &&
+        date.getUTCHours() === Number(hours) &&
+        date.getUTCMinutes() === Number(minutes) &&
+        date.getUTCSeconds() === Number(seconds)
+      ) {
+        return date;
+      }
+      return null;
+    }
+
+    const fallbackDate = new Date(value);
+    return Number.isNaN(fallbackDate.getTime()) ? null : fallbackDate;
+  }
+
+  function formatLocalDate(value) {
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "Время неизвестно" : dateFormatter.format(date);
+    return Number.isNaN(date.getTime())
+      ? "Время неизвестно"
+      : localDateFormatter.format(date);
   }
 
   function escapeXml(value) {
