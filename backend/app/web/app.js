@@ -1009,45 +1009,68 @@
   function captureScrollState() {
     const maxLeft = Math.max(chartViewport.scrollWidth - chartViewport.clientWidth, 0);
     const maxTop = Math.max(chartViewport.scrollHeight - chartViewport.clientHeight, 0);
+    let verticalAnchorValue = null;
+    let verticalAnchorViewportY = null;
+
+    if (currentAxisModel) {
+      const { margin, maxY, yRange, plotHeight } = currentAxisModel;
+      verticalAnchorViewportY = Math.max(
+        (chartViewport.clientHeight - margin.bottom) / 2,
+        0
+      );
+      const anchorContentY = chartViewport.scrollTop + verticalAnchorViewportY;
+      verticalAnchorValue = maxY -
+        ((anchorContentY - margin.top) / plotHeight) * yRange;
+    }
+
     return {
       left: chartViewport.scrollLeft,
       top: chartViewport.scrollTop,
       maxLeft,
       maxTop,
       nearRight: maxLeft - chartViewport.scrollLeft <= 40,
-      horizontalRatio: maxLeft > 0 ? chartViewport.scrollLeft / maxLeft : 1,
-      verticalRatio: maxTop > 0 ? chartViewport.scrollTop / maxTop : 0
+      verticalAnchorValue,
+      verticalAnchorViewportY
     };
   }
 
   function restoreScrollState({ previousScroll, preserveScroll, latestPointY }) {
-    requestAnimationFrame(() => {
-      const maxLeft = Math.max(chartViewport.scrollWidth - chartViewport.clientWidth, 0);
-      const maxTop = Math.max(chartViewport.scrollHeight - chartViewport.clientHeight, 0);
+    const maxLeft = Math.max(chartViewport.scrollWidth - chartViewport.clientWidth, 0);
+    const maxTop = Math.max(chartViewport.scrollHeight - chartViewport.clientHeight, 0);
 
-      if (!preserveScroll || previousScroll.nearRight) {
-        chartViewport.scrollLeft = maxLeft;
-        chartViewport.scrollTop = clamp(
-          latestPointY - chartViewport.clientHeight / 2,
-          0,
-          maxTop
-        );
-        scheduleStickyAxesRender();
-        return;
-      }
-
-      chartViewport.scrollLeft = clamp(
-        previousScroll.horizontalRatio * maxLeft,
-        0,
-        maxLeft
-      );
+    if (!preserveScroll) {
+      chartViewport.scrollLeft = maxLeft;
       chartViewport.scrollTop = clamp(
-        previousScroll.verticalRatio * maxTop,
+        latestPointY - chartViewport.clientHeight / 2,
         0,
         maxTop
       );
       scheduleStickyAxesRender();
-    });
+      return;
+    }
+
+    chartViewport.scrollLeft = previousScroll.nearRight
+      ? maxLeft
+      : clamp(previousScroll.left, 0, maxLeft);
+
+    if (
+      currentAxisModel &&
+      Number.isFinite(previousScroll.verticalAnchorValue) &&
+      Number.isFinite(previousScroll.verticalAnchorViewportY)
+    ) {
+      const { margin, maxY, yRange, plotHeight } = currentAxisModel;
+      const anchorContentY = margin.top +
+        ((maxY - previousScroll.verticalAnchorValue) / yRange) * plotHeight;
+      chartViewport.scrollTop = clamp(
+        anchorContentY - previousScroll.verticalAnchorViewportY,
+        0,
+        maxTop
+      );
+    } else {
+      chartViewport.scrollTop = clamp(previousScroll.top, 0, maxTop);
+    }
+
+    scheduleStickyAxesRender();
   }
 
   function scheduleStickyAxesRender() {
