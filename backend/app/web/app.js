@@ -4,6 +4,7 @@
   const thresholdInput = document.getElementById("threshold-input");
   const visibleResultsInput = document.getElementById("visible-results-input");
   const visibleHeightInput = document.getElementById("visible-height-input");
+  const balanceTickStepInput = document.getElementById("balance-tick-step-input");
   const calculateButton = document.getElementById("calculate-button");
   const autoRefresh = document.getElementById("auto-refresh");
   const crosshairEnabled = document.getElementById("crosshair-enabled");
@@ -61,6 +62,7 @@
   let latestResponse = null;
   let activeController = null;
   let autoRefreshTimer = null;
+  let autoRefreshEnabled = true;
   let resizeTimer = null;
   let chartControlTimer = null;
   let chartHasRendered = false;
@@ -75,14 +77,17 @@
   let suppressNextChartClick = false;
   let lastChartOptions = {
     visibleResults: 100,
-    visibleHeight: 50
+    visibleHeight: 50,
+    balanceTickStep: 0
   };
 
   restoreInterfaceSettings();
+  syncAutoRefreshButton();
   renderPresets();
   enableWheelNumberInput(thresholdInput, { decimals: 2, ctrlStep: 10 });
   enableWheelNumberInput(visibleResultsInput, { decimals: 0, ctrlStep: 100 });
   enableWheelNumberInput(visibleHeightInput, { decimals: 0, ctrlStep: 50 });
+  enableWheelNumberInput(balanceTickStepInput, { decimals: 2, ctrlStep: 10 });
 
   calculateButton.addEventListener("click", () => {
     saveInterfaceSettings();
@@ -92,6 +97,7 @@
   thresholdInput.addEventListener("input", saveInterfaceSettings);
   visibleResultsInput.addEventListener("keydown", handleChartControlOnEnter);
   visibleHeightInput.addEventListener("keydown", handleChartControlOnEnter);
+  balanceTickStepInput.addEventListener("keydown", handleChartControlOnEnter);
   visibleResultsInput.addEventListener("input", () => {
     saveInterfaceSettings();
     scheduleLocalChartRender();
@@ -100,7 +106,13 @@
     saveInterfaceSettings();
     scheduleLocalChartRender();
   });
-  autoRefresh.addEventListener("change", () => {
+  balanceTickStepInput.addEventListener("input", () => {
+    saveInterfaceSettings();
+    scheduleLocalChartRender();
+  });
+  autoRefresh.addEventListener("click", () => {
+    autoRefreshEnabled = !autoRefreshEnabled;
+    syncAutoRefreshButton();
     saveInterfaceSettings();
     configureAutoRefresh();
   });
@@ -206,7 +218,7 @@
     const chartOptions = readChartOptions();
 
     if (threshold === null || !chartOptions) {
-      showError("Перед сохранением пресета проверьте значение x и размеры графика.");
+      showError("Перед сохранением пресета проверьте значение x и настройки графика.");
       return;
     }
 
@@ -216,7 +228,8 @@
 
     const requestedName = presetNameInput.value.trim();
     const fallbackName =
-      `x ${threshold.toFixed(2)} · ${chartOptions.visibleResults} × ${chartOptions.visibleHeight}`;
+      `x ${threshold.toFixed(2)} · ${chartOptions.visibleResults} × ${chartOptions.visibleHeight} · ` +
+      `шаг ${formatBalanceTickStep(chartOptions.balanceTickStep)}`;
     const name = (requestedName || fallbackName).slice(0, 60);
     const existingIndex = presets.findIndex(
       (preset) => preset.name.toLocaleLowerCase("ru-RU") === name.toLocaleLowerCase("ru-RU")
@@ -226,7 +239,8 @@
       name,
       threshold,
       visibleResults: chartOptions.visibleResults,
-      visibleHeight: chartOptions.visibleHeight
+      visibleHeight: chartOptions.visibleHeight,
+      balanceTickStep: chartOptions.balanceTickStep
     };
 
     if (existingIndex >= 0) {
@@ -249,7 +263,8 @@
       .map((preset) => {
         const title =
           `x ${formatPresetThreshold(preset.threshold)} · ` +
-          `${formatNumber(preset.visibleResults)} × ${formatNumber(preset.visibleHeight)}`;
+          `${formatNumber(preset.visibleResults)} × ${formatNumber(preset.visibleHeight)} · ` +
+          `шаг ${formatBalanceTickStep(preset.balanceTickStep)}`;
         return (
           `<div class="preset-item" data-preset-id="${escapeXml(preset.id)}">` +
             `<button class="preset-apply" type="button" data-preset-action="apply" ` +
@@ -290,6 +305,7 @@
     thresholdInput.value = Number(preset.threshold).toFixed(2);
     visibleResultsInput.value = String(preset.visibleResults);
     visibleHeightInput.value = String(preset.visibleHeight);
+    balanceTickStepInput.value = formatInputNumber(preset.balanceTickStep);
     saveInterfaceSettings();
     loadAnalysis();
   }
@@ -335,9 +351,18 @@
     clearInterval(autoRefreshTimer);
     autoRefreshTimer = null;
 
-    if (autoRefresh.checked) {
+    if (autoRefreshEnabled) {
       autoRefreshTimer = setInterval(() => loadAnalysis({ quiet: true }), 5000);
     }
+  }
+
+  function syncAutoRefreshButton() {
+    autoRefresh.classList.toggle("is-enabled", autoRefreshEnabled);
+    autoRefresh.classList.toggle("is-disabled", !autoRefreshEnabled);
+    autoRefresh.setAttribute("aria-pressed", String(autoRefreshEnabled));
+    autoRefresh.title = autoRefreshEnabled
+      ? "Автообновление включено: каждые 5 секунд"
+      : "Автообновление выключено";
   }
 
   async function loadAnalysis({ quiet = false } = {}) {
@@ -350,7 +375,10 @@
       return;
     }
     if (!chartOptions) {
-      showError("Количество результатов должно быть не меньше 2, высота — не меньше 1.");
+      showError(
+        "Количество результатов должно быть не меньше 2, высота — не меньше 1, " +
+        "шаг меток — 0 или положительное число."
+      );
       return;
     }
 
@@ -524,7 +552,9 @@
       .filter(Number.isFinite);
     const dataMinY = Math.min(0, ...balances, ...manualLineValues);
     const dataMaxY = Math.max(0, ...balances, ...manualLineValues);
-    const yTickStep = calculateNiceStep(options.visibleHeight / 5);
+    const yTickStep = options.balanceTickStep > 0
+      ? options.balanceTickStep
+      : calculateNiceStep(options.visibleHeight / 5);
     let minY = Math.floor(dataMinY / yTickStep) * yTickStep;
     let maxY = Math.ceil(dataMaxY / yTickStep) * yTickStep;
 
@@ -1323,8 +1353,11 @@
       if (typeof settings.visibleHeight === "string") {
         visibleHeightInput.value = settings.visibleHeight;
       }
+      if (typeof settings.balanceTickStep === "string") {
+        balanceTickStepInput.value = settings.balanceTickStep;
+      }
       if (typeof settings.autoRefresh === "boolean") {
-        autoRefresh.checked = settings.autoRefresh;
+        autoRefreshEnabled = settings.autoRefresh;
       }
       if (typeof settings.crosshairEnabled === "boolean") {
         crosshairEnabled.checked = settings.crosshairEnabled;
@@ -1337,13 +1370,15 @@
             name: typeof preset?.name === "string" ? preset.name.trim().slice(0, 60) : "",
             threshold: parseThreshold(preset?.threshold),
             visibleResults: parseIntegerInRange(preset?.visibleResults, 2, 10_000),
-            visibleHeight: parseIntegerInRange(preset?.visibleHeight, 1, 1_000_000)
+            visibleHeight: parseIntegerInRange(preset?.visibleHeight, 1, 1_000_000),
+            balanceTickStep: parseBalanceTickStep(preset?.balanceTickStep ?? 0)
           }))
           .filter((preset) =>
             preset.name &&
             preset.threshold !== null &&
             preset.visibleResults !== null &&
-            preset.visibleHeight !== null
+            preset.visibleHeight !== null &&
+            preset.balanceTickStep !== null
           );
       }
       if (Array.isArray(settings.manualLines)) {
@@ -1368,7 +1403,8 @@
           threshold: thresholdInput.value,
           visibleResults: visibleResultsInput.value,
           visibleHeight: visibleHeightInput.value,
-          autoRefresh: autoRefresh.checked,
+          balanceTickStep: balanceTickStepInput.value,
+          autoRefresh: autoRefreshEnabled,
           crosshairEnabled: crosshairEnabled.checked,
           presets,
           manualLines
@@ -1390,18 +1426,24 @@
       1,
       1_000_000
     );
+    const balanceTickStep = parseBalanceTickStep(balanceTickStepInput.value);
 
-    if (visibleResults === null || visibleHeight === null) {
+    if (
+      visibleResults === null ||
+      visibleHeight === null ||
+      balanceTickStep === null
+    ) {
       return null;
     }
 
-    return { visibleResults, visibleHeight };
+    return { visibleResults, visibleHeight, balanceTickStep };
   }
 
   function normalizeChartInputs(options) {
     lastChartOptions = { ...options };
     visibleResultsInput.value = String(options.visibleResults);
     visibleHeightInput.value = String(options.visibleHeight);
+    balanceTickStepInput.value = formatInputNumber(options.balanceTickStep);
     saveInterfaceSettings();
   }
 
@@ -1441,6 +1483,15 @@
       return null;
     }
     return value;
+  }
+
+  function parseBalanceTickStep(rawValue) {
+    const normalized = String(rawValue).trim().replace(",", ".");
+    const value = Number(normalized);
+    if (!Number.isFinite(value) || value < 0 || value > 1_000_000) {
+      return null;
+    }
+    return Math.round(value * 10000) / 10000;
   }
 
   function calculateNiceIntegerStep(rawStep) {
@@ -1506,6 +1557,15 @@
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     }).format(Number(value));
+  }
+
+  function formatBalanceTickStep(value) {
+    const numeric = Number(value);
+    return numeric > 0 ? formatNumber(numeric) : "авто";
+  }
+
+  function formatInputNumber(value) {
+    return String(normalizeFloatingPoint(Number(value) || 0));
   }
 
   function formatRecentMultiplier(value) {

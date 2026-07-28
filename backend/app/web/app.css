@@ -150,7 +150,7 @@ h2 {
 
 .controls-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(170px, 1fr)) minmax(310px, auto);
+  grid-template-columns: repeat(4, minmax(150px, 1fr)) minmax(130px, auto);
   align-items: end;
   gap: 14px;
 }
@@ -187,8 +187,7 @@ h2 {
 }
 
 .controls-actions {
-  display: grid;
-  grid-template-columns: auto minmax(210px, 1fr);
+  display: flex;
   align-items: center;
   gap: 14px;
   padding-bottom: 37px;
@@ -370,27 +369,6 @@ button:disabled {
   opacity: 0.65;
 }
 
-.auto-refresh {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 43px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-soft);
-  color: var(--muted);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.auto-refresh input {
-  flex: 0 0 auto;
-  width: 17px;
-  height: 17px;
-  accent-color: var(--accent);
-}
-
 .last-update {
   color: var(--muted);
   font-size: 12px;
@@ -545,6 +523,18 @@ button:disabled {
   border-color: var(--manual-line);
   background: rgba(245, 158, 11, 0.14);
   color: #ffd28a;
+}
+
+.auto-refresh-button.is-enabled {
+  border-color: rgba(41, 199, 121, 0.65);
+  background: rgba(41, 199, 121, 0.15);
+  color: var(--positive);
+}
+
+.auto-refresh-button.is-disabled {
+  border-color: rgba(255, 102, 117, 0.65);
+  background: rgba(255, 102, 117, 0.14);
+  color: var(--negative);
 }
 
 .analysis-workspace:fullscreen {
@@ -907,7 +897,7 @@ button:disabled {
 
 @media (max-width: 980px) {
   .controls-grid {
-    grid-template-columns: repeat(3, minmax(150px, 1fr));
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
   }
 
   .controls-actions {
@@ -956,11 +946,9 @@ button:disabled {
 
   .controls-actions {
     grid-column: auto;
-    grid-template-columns: 1fr;
   }
 
-  .controls-actions button,
-  .auto-refresh {
+  .controls-actions button {
     width: 100%;
   }
 
@@ -972,11 +960,6 @@ button:disabled {
 
   .chart-tool-toggle {
     justify-content: center;
-  }
-
-  .auto-refresh {
-    justify-content: center;
-    white-space: normal;
   }
 
   .presets-toolbar {

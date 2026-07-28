@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aviator — анализ результатов</title>
-  <link rel="stylesheet" href="/assets/app.css?v=20260728.7">
+  <link rel="stylesheet" href="/assets/app.css?v=20260728.8">
 </head>
 <body>
   <main class="page-shell">
@@ -67,12 +67,22 @@
           <small>Количество пунктов баланса по вертикали</small>
         </label>
 
+        <label class="field" for="balance-tick-step-input">
+          <span>Шаг меток баланса</span>
+          <input
+            id="balance-tick-step-input"
+            type="number"
+            min="0"
+            max="1000000"
+            step="0.01"
+            value="0"
+            inputmode="decimal"
+          >
+          <small>0 — рассчитывать автоматически</small>
+        </label>
+
         <div class="controls-actions">
           <button id="calculate-button" type="button">Рассчитать</button>
-          <label class="auto-refresh">
-            <input id="auto-refresh" type="checkbox" checked>
-            <span>Обновлять данные каждые 5 секунд</span>
-          </label>
         </div>
       </div>
 
@@ -80,7 +90,7 @@
         <div class="presets-toolbar">
           <div class="presets-heading">
             <strong id="presets-title">Пресеты настроек</strong>
-            <span>Значение x · количество результатов · высота графика</span>
+            <span>Значение x · количество результатов · высота графика · шаг меток</span>
           </div>
           <label class="preset-name-field" for="preset-name-input">
             <span class="visually-hidden">Название пресета</span>
@@ -142,6 +152,15 @@
               aria-pressed="false"
             >
               Во весь экран
+            </button>
+            <button
+              id="auto-refresh"
+              class="secondary-button auto-refresh-button is-enabled"
+              type="button"
+              aria-pressed="true"
+              title="Автообновление включено: каждые 5 секунд"
+            >
+              Обновлять
             </button>
           </div>
         </div>
@@ -216,6 +235,6 @@
     <div class="error-box" id="error-box" role="alert" hidden></div>
   </main>
 
-  <script src="/assets/app.js?v=20260728.7" defer></script>
+  <script src="/assets/app.js?v=20260728.8" defer></script>
 </body>
 </html>
