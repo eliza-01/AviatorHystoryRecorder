@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aviator — анализ результатов</title>
-  <link rel="stylesheet" href="/assets/app.css?v=20260728.3">
+  <link rel="stylesheet" href="/assets/app.css?v=20260728.5">
 </head>
 <body>
   <main class="page-shell">
@@ -22,6 +22,7 @@
       </div>
     </header>
 
+    <section id="analysis-workspace" class="analysis-workspace" aria-label="График и настройки">
     <section class="controls-panel" aria-label="Параметры анализа">
       <div class="controls-grid">
         <label class="field" for="threshold-input">
@@ -75,8 +76,31 @@
         </div>
       </div>
 
+      <div class="presets-panel" aria-labelledby="presets-title">
+        <div class="presets-toolbar">
+          <div class="presets-heading">
+            <strong id="presets-title">Пресеты настроек</strong>
+            <span>Значение x · количество результатов · высота графика</span>
+          </div>
+          <label class="preset-name-field" for="preset-name-input">
+            <span class="visually-hidden">Название пресета</span>
+            <input
+              id="preset-name-input"
+              type="text"
+              maxlength="60"
+              autocomplete="off"
+              placeholder="Название пресета (необязательно)"
+            >
+          </label>
+          <button id="save-preset-button" class="secondary-button" type="button">
+            Сохранить текущие
+          </button>
+        </div>
+        <div id="presets-list" class="presets-list" aria-live="polite"></div>
+      </div>
+
       <div class="controls-footer">
-        <span>Значения сохраняются в этом браузере</span>
+        <span>Значения и пресеты сохраняются в этом браузере</span>
         <div class="last-update" id="last-update">Последнее обновление: —</div>
       </div>
     </section>
@@ -111,6 +135,14 @@
             >
               + Горизонтальная линия
             </button>
+            <button
+              id="fullscreen-button"
+              class="secondary-button"
+              type="button"
+              aria-pressed="false"
+            >
+              Во весь экран
+            </button>
           </div>
         </div>
       </div>
@@ -128,6 +160,7 @@
         <div class="chart-empty" id="chart-empty" hidden>В базе пока нет результатов</div>
         <div class="chart-tooltip" id="chart-tooltip" hidden></div>
       </div>
+    </section>
     </section>
 
     <section class="stats-section" aria-labelledby="stats-title">
@@ -183,6 +216,6 @@
     <div class="error-box" id="error-box" role="alert" hidden></div>
   </main>
 
-  <script src="/assets/app.js?v=20260728.3" defer></script>
+  <script src="/assets/app.js?v=20260728.5" defer></script>
 </body>
 </html>

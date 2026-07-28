@@ -8,6 +8,11 @@
   const autoRefresh = document.getElementById("auto-refresh");
   const crosshairEnabled = document.getElementById("crosshair-enabled");
   const addHorizontalLineButton = document.getElementById("add-horizontal-line-button");
+  const analysisWorkspace = document.getElementById("analysis-workspace");
+  const fullscreenButton = document.getElementById("fullscreen-button");
+  const presetNameInput = document.getElementById("preset-name-input");
+  const savePresetButton = document.getElementById("save-preset-button");
+  const presetsList = document.getElementById("presets-list");
   const connectionStatus = document.getElementById("connection-status");
   const lastUpdate = document.getElementById("last-update");
   const chartCaption = document.getElementById("chart-caption");
@@ -50,6 +55,7 @@
   });
   const SETTINGS_STORAGE_KEY = "aviator-analysis-interface-v1";
   const RECENT_RESULTS_LIMIT = 15;
+  const PRESETS_LIMIT = 30;
 
   let latestResponse = null;
   let activeController = null;
@@ -60,6 +66,7 @@
   let currentAxisModel = null;
   let axisRenderFrame = null;
   let manualLines = [];
+  let presets = [];
   let linePlacementMode = false;
   let activeLineDragId = null;
   let lastChartOptions = {
@@ -68,6 +75,7 @@
   };
 
   restoreInterfaceSettings();
+  renderPresets();
   enableWheelNumberInput(thresholdInput, { decimals: 2 });
   enableWheelNumberInput(visibleResultsInput, { decimals: 0 });
   enableWheelNumberInput(visibleHeightInput, { decimals: 0 });
@@ -99,14 +107,36 @@
   addHorizontalLineButton.addEventListener("click", () => {
     setLinePlacementMode(!linePlacementMode);
   });
+  savePresetButton.addEventListener("click", saveCurrentPreset);
+  presetNameInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveCurrentPreset();
+    }
+  });
+  presetsList.addEventListener("click", handlePresetListClick);
+  fullscreenButton.addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", syncFullscreenState);
+  document.addEventListener("fullscreenerror", () => {
+    showError("Браузер не разрешил открыть полноэкранный режим.");
+  });
   manualLinesLayer.addEventListener("pointerdown", handleManualLinePointerDown);
   manualLinesLayer.addEventListener("click", handleManualLineClick);
   window.addEventListener("pointermove", handleManualLinePointerMove);
   window.addEventListener("pointerup", stopManualLineDrag);
   window.addEventListener("pointercancel", stopManualLineDrag);
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && linePlacementMode) {
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    if (linePlacementMode) {
       setLinePlacementMode(false);
+    }
+    if (document.fullscreenElement === analysisWorkspace) {
+      document.exitFullscreen().catch(() => {
+        // Браузер также обрабатывает Esc самостоятельно.
+      });
     }
   });
   chartViewport.addEventListener("scroll", () => {
@@ -165,6 +195,136 @@
     normalizeChartInputs(options);
     renderChart(latestResponse.points, { preserveScroll });
     updateChartCaption(latestResponse.stats, options);
+  }
+
+  function saveCurrentPreset() {
+    const threshold = parseThreshold(thresholdInput.value);
+    const chartOptions = readChartOptions();
+
+    if (threshold === null || !chartOptions) {
+      showError("Перед сохранением пресета проверьте значение x и размеры графика.");
+      return;
+    }
+
+    hideError();
+    thresholdInput.value = threshold.toFixed(2);
+    normalizeChartInputs(chartOptions);
+
+    const requestedName = presetNameInput.value.trim();
+    const fallbackName =
+      `x ${threshold.toFixed(2)} · ${chartOptions.visibleResults} × ${chartOptions.visibleHeight}`;
+    const name = (requestedName || fallbackName).slice(0, 60);
+    const existingIndex = presets.findIndex(
+      (preset) => preset.name.toLocaleLowerCase("ru-RU") === name.toLocaleLowerCase("ru-RU")
+    );
+    const preset = {
+      id: existingIndex >= 0 ? presets[existingIndex].id : createPresetId(),
+      name,
+      threshold,
+      visibleResults: chartOptions.visibleResults,
+      visibleHeight: chartOptions.visibleHeight
+    };
+
+    if (existingIndex >= 0) {
+      presets.splice(existingIndex, 1);
+    }
+    presets.unshift(preset);
+    presets = presets.slice(0, PRESETS_LIMIT);
+    presetNameInput.value = "";
+    saveInterfaceSettings();
+    renderPresets();
+  }
+
+  function renderPresets() {
+    if (!presets.length) {
+      presetsList.innerHTML = '<span class="presets-empty">Пресетов пока нет</span>';
+      return;
+    }
+
+    presetsList.innerHTML = presets
+      .map((preset) => {
+        const title =
+          `x ${formatPresetThreshold(preset.threshold)} · ` +
+          `${formatNumber(preset.visibleResults)} × ${formatNumber(preset.visibleHeight)}`;
+        return (
+          `<div class="preset-item" data-preset-id="${escapeXml(preset.id)}">` +
+            `<button class="preset-apply" type="button" data-preset-action="apply" ` +
+              `title="Применить: ${escapeXml(title)}">` +
+              `<strong>${escapeXml(preset.name)}</strong>` +
+              `<span>${escapeXml(title)}</span>` +
+            `</button>` +
+            `<button class="preset-delete" type="button" data-preset-action="delete" ` +
+              `aria-label="Удалить пресет ${escapeXml(preset.name)}" ` +
+              `title="Удалить пресет">×</button>` +
+          `</div>`
+        );
+      })
+      .join("");
+  }
+
+  function handlePresetListClick(event) {
+    const actionButton = event.target.closest("[data-preset-action]");
+    const presetElement = event.target.closest("[data-preset-id]");
+    if (!actionButton || !presetElement) {
+      return;
+    }
+
+    const presetId = presetElement.dataset.presetId;
+    const presetIndex = presets.findIndex((preset) => preset.id === presetId);
+    if (presetIndex < 0) {
+      return;
+    }
+
+    if (actionButton.dataset.presetAction === "delete") {
+      presets.splice(presetIndex, 1);
+      saveInterfaceSettings();
+      renderPresets();
+      return;
+    }
+
+    const preset = presets[presetIndex];
+    thresholdInput.value = Number(preset.threshold).toFixed(2);
+    visibleResultsInput.value = String(preset.visibleResults);
+    visibleHeightInput.value = String(preset.visibleHeight);
+    saveInterfaceSettings();
+    loadAnalysis();
+  }
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        return;
+      }
+
+      if (!analysisWorkspace.requestFullscreen) {
+        showError("Этот браузер не поддерживает полноэкранный режим.");
+        return;
+      }
+
+      hideError();
+      await analysisWorkspace.requestFullscreen();
+    } catch (error) {
+      showError(`Не удалось открыть полноэкранный режим: ${error.message}`);
+    }
+  }
+
+  function syncFullscreenState() {
+    const isFullscreen = document.fullscreenElement === analysisWorkspace;
+    analysisWorkspace.classList.toggle("is-fullscreen", isFullscreen);
+    fullscreenButton.textContent = isFullscreen
+      ? "Выйти из полного экрана"
+      : "Во весь экран";
+    fullscreenButton.setAttribute("aria-pressed", String(isFullscreen));
+
+    tooltip.hidden = true;
+    setElementHidden(crosshairYValue, true);
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (latestResponse) {
+        renderChart(latestResponse.points, { preserveScroll: true });
+      }
+    }, 100);
   }
 
   function configureAutoRefresh() {
@@ -919,6 +1079,14 @@
     return normalizeFloatingPoint(clamp(value, minY, maxY));
   }
 
+  function createPresetId() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return `preset-${crypto.randomUUID()}`;
+    }
+
+    return `preset-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
   function createManualLineId() {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
       return crypto.randomUUID();
@@ -982,6 +1150,23 @@
       if (typeof settings.crosshairEnabled === "boolean") {
         crosshairEnabled.checked = settings.crosshairEnabled;
       }
+      if (Array.isArray(settings.presets)) {
+        presets = settings.presets
+          .slice(0, PRESETS_LIMIT)
+          .map((preset) => ({
+            id: typeof preset?.id === "string" ? preset.id : createPresetId(),
+            name: typeof preset?.name === "string" ? preset.name.trim().slice(0, 60) : "",
+            threshold: parseThreshold(preset?.threshold),
+            visibleResults: parseIntegerInRange(preset?.visibleResults, 2, 10_000),
+            visibleHeight: parseIntegerInRange(preset?.visibleHeight, 1, 1_000_000)
+          }))
+          .filter((preset) =>
+            preset.name &&
+            preset.threshold !== null &&
+            preset.visibleResults !== null &&
+            preset.visibleHeight !== null
+          );
+      }
       if (Array.isArray(settings.manualLines)) {
         manualLines = settings.manualLines
           .slice(0, 50)
@@ -1006,6 +1191,7 @@
           visibleHeight: visibleHeightInput.value,
           autoRefresh: autoRefresh.checked,
           crosshairEnabled: crosshairEnabled.checked,
+          presets,
           manualLines
         })
       );
@@ -1131,6 +1317,13 @@
   function hideError() {
     errorBox.hidden = true;
     errorBox.textContent = "";
+  }
+
+  function formatPresetThreshold(value) {
+    return new Intl.NumberFormat("ru-RU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(Number(value));
   }
 
   function formatRecentMultiplier(value) {
