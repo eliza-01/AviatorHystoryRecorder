@@ -1197,11 +1197,11 @@
       rows.push(
         `<div class="manual-line" data-line-id="${escapeXml(line.id)}" ` +
         `style="top:${viewportY}px">` +
+        `<span class="manual-line-stroke" aria-hidden="true"></span>` +
         `<button class="manual-line-drag" type="button" ` +
         `aria-label="Переместить горизонтальную линию ${escapeXml(formatNumber(value))}">` +
-        `<span class="manual-line-stroke" aria-hidden="true"></span>` +
+        `${escapeXml(formatNumber(value))}` +
         `</button>` +
-        `<span class="manual-line-value">${escapeXml(formatNumber(value))}</span>` +
         `<button class="manual-line-delete" type="button" ` +
         `aria-label="Удалить горизонтальную линию">×</button>` +
         `</div>`
