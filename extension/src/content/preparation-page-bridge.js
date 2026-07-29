@@ -558,7 +558,18 @@
       target.focus?.();
     }
 
-    if (!wasFocused || document.activeElement === input) {
+    // В неактивном окне Chrome может не передать реальный фокус другому
+    // элементу iframe. В таком случае принудительно вызываем blur-сценарий,
+    // который app-spinner использует для записи pending value в Angular-модель.
+    if (document.activeElement === input) {
+      try {
+        input.blur();
+      } catch {
+        // Ниже в любом случае есть синтетический blur/focusout.
+      }
+    }
+
+    if (!wasFocused || document.activeElement === input || !document.hasFocus()) {
       dispatchExplicitBlur(input, target);
     }
 
@@ -660,11 +671,12 @@
 
   function isInputCommitted(input, expected) {
     const spinner = input.closest("app-spinner");
-    const focusLeftInput = document.activeElement !== input;
+    const focusWasCommitted =
+      document.activeElement !== input || !document.hasFocus();
     const angularTouched = !spinner || spinner.classList.contains("ng-touched");
 
     return Boolean(
-      focusLeftInput && angularTouched && valuesMatch(input.value, expected)
+      focusWasCommitted && angularTouched && valuesMatch(input.value, expected)
     );
   }
 
