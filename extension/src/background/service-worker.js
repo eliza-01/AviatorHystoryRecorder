@@ -101,6 +101,7 @@ async function getCaptureState(sender, message) {
 
   return {
     ok: true,
+    aviatorTab,
     enabled: Boolean(settings.enabled && aviatorTab),
     diagnosticsEnabled: Boolean(settings.diagnosticsEnabled),
     pageAutoReloadEnabled: Boolean(

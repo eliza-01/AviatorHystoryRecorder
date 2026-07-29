@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Aviator History Recorder",
-  "version": "1.5.4",
+  "version": "1.5.6",
   "description": "Сохраняет результаты Aviator, настраивает интерфейс игры и умеет автоматически перезагружать вкладку.",
   "permissions": [
     "storage",

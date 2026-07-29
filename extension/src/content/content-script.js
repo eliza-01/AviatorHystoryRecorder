@@ -22,6 +22,19 @@
   let lastStatusSentAt = 0;
   let scannerStarted = false;
   let pageAutoReloadTimer = null;
+  let pageAutoReloadProgressTimer = null;
+  let pageAutoReloadDeadline = null;
+  let pageAutoReloadDurationMs = 0;
+  let pageAutoReloadEnabled = false;
+  let pageAutoReloadSeconds = 60;
+  let pageAutoReloadBadgeHost = null;
+  let pageAutoReloadBadgeButton = null;
+  let pageAutoReloadBadgeText = null;
+  let pageAutoReloadBadgeProgress = null;
+  let pageAutoReloadBadgeBusy = false;
+  let pageAutoReloadBadgeError = null;
+  let pageAutoReloadBadgePointerHandler = null;
+  let pageAutoReloadBadgeKeyboardHandler = null;
   let topPageReady = document.readyState === "complete";
 
   start();
@@ -72,6 +85,7 @@
   async function configurePageAutoReload() {
     clearTimeout(pageAutoReloadTimer);
     pageAutoReloadTimer = null;
+    stopPageAutoReloadProgress();
 
     try {
       const response = await chrome.runtime.sendMessage({
@@ -79,22 +93,349 @@
         pageUrl: location.href
       });
 
-      if (!response?.ok || !response.pageAutoReloadEnabled) {
+      if (!response?.ok || !response.aviatorTab) {
+        removePageAutoReloadBadge();
         return;
       }
 
-      const seconds = clampInteger(
+      pageAutoReloadSeconds = clampInteger(
         response.pageAutoReloadSeconds,
         MIN_AUTO_RELOAD_SECONDS,
         MAX_AUTO_RELOAD_SECONDS,
         60
       );
+      pageAutoReloadEnabled = Boolean(response.pageAutoReloadEnabled);
+      pageAutoReloadBadgeError = null;
+
+      ensurePageAutoReloadBadge();
+
+      if (!pageAutoReloadEnabled) {
+        updatePageAutoReloadBadge();
+        return;
+      }
+
+      pageAutoReloadDurationMs = pageAutoReloadSeconds * 1000;
+      pageAutoReloadDeadline = Date.now() + pageAutoReloadDurationMs;
+      updatePageAutoReloadBadge();
+
+      pageAutoReloadProgressTimer = setInterval(
+        updatePageAutoReloadBadge,
+        250
+      );
 
       pageAutoReloadTimer = setTimeout(() => {
         location.reload();
-      }, seconds * 1000);
+      }, pageAutoReloadDurationMs);
     } catch {
       // После перезагрузки расширения старый content script теряет контекст.
+      removePageAutoReloadBadge();
+    }
+  }
+
+  function ensurePageAutoReloadBadge() {
+    if (pageAutoReloadBadgeHost?.isConnected) {
+      return;
+    }
+
+    const host = document.createElement("div");
+    host.id = "aviator-extension-auto-reload-badge";
+    host.style.cssText = [
+      "position:fixed",
+      "top:10px",
+      "left:50%",
+      "transform:translateX(-50%)",
+      "z-index:2147483647",
+      "display:block",
+      "max-width:calc(100vw - 20px)",
+      "pointer-events:auto"
+    ].join(";");
+
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = `
+      button {
+        position: relative;
+        box-sizing: border-box;
+        min-width: 250px;
+        max-width: calc(100vw - 20px);
+        overflow: hidden;
+        padding: 9px 14px 11px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 999px;
+        background: rgba(20, 23, 28, 0.94);
+        box-shadow: 0 5px 18px rgba(0, 0, 0, 0.32);
+        color: #ffffff;
+        font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: center;
+        white-space: nowrap;
+        cursor: pointer;
+        touch-action: manipulation;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      button:hover {
+        background: rgba(30, 34, 40, 0.97);
+      }
+      button:focus-visible {
+        outline: 2px solid #ffffff;
+        outline-offset: 2px;
+      }
+      button[data-enabled="true"] {
+        border-color: rgba(55, 214, 116, 0.72);
+      }
+      button[data-enabled="false"] {
+        border-color: rgba(255, 91, 91, 0.72);
+      }
+      button[data-busy="true"] {
+        cursor: wait;
+        opacity: 0.78;
+      }
+      button[data-error="true"] {
+        border-color: rgba(255, 184, 77, 0.9);
+      }
+      .text {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .progress-track {
+        position: absolute;
+        right: 8px;
+        bottom: 4px;
+        left: 8px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.22);
+      }
+      .progress-value {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border-radius: inherit;
+        background: #37d674;
+        opacity: 1;
+        transform: scaleX(0);
+        transform-origin: left center;
+        transition: transform 220ms linear;
+      }
+      button[data-enabled="false"] .progress-value {
+        background: #ff5b5b;
+      }
+      @media (max-width: 360px) {
+        button {
+          min-width: 0;
+          width: calc(100vw - 20px);
+          font-size: 12px;
+        }
+      }
+    `;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("aria-live", "polite");
+
+    const text = document.createElement("span");
+    text.className = "text";
+
+    const progressTrack = document.createElement("span");
+    progressTrack.className = "progress-track";
+    progressTrack.setAttribute("aria-hidden", "true");
+
+    const progress = document.createElement("span");
+    progress.className = "progress-value";
+    progressTrack.append(progress);
+    button.append(text, progressTrack);
+    shadow.append(style, button);
+
+    pageAutoReloadBadgePointerHandler = (event) => {
+      if (
+        event.button !== 0 ||
+        !isPageAutoReloadBadgeEvent(event, host)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void togglePageAutoReloadFromBadge();
+    };
+
+    pageAutoReloadBadgeKeyboardHandler = (event) => {
+      if (
+        event.detail !== 0 ||
+        !isPageAutoReloadBadgeEvent(event, host)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void togglePageAutoReloadFromBadge();
+    };
+
+    window.addEventListener(
+      "pointerdown",
+      pageAutoReloadBadgePointerHandler,
+      true
+    );
+    window.addEventListener(
+      "click",
+      pageAutoReloadBadgeKeyboardHandler,
+      true
+    );
+
+    pageAutoReloadBadgeHost = host;
+    pageAutoReloadBadgeButton = button;
+    pageAutoReloadBadgeText = text;
+    pageAutoReloadBadgeProgress = progress;
+
+    (document.documentElement || document).append(host);
+    updatePageAutoReloadBadge();
+  }
+
+  function isPageAutoReloadBadgeEvent(event, host) {
+    if (!host?.isConnected) {
+      return false;
+    }
+
+    const path =
+      typeof event.composedPath === "function"
+        ? event.composedPath()
+        : [];
+
+    return event.target === host || path.includes(host);
+  }
+
+  function removePageAutoReloadBadge() {
+    stopPageAutoReloadProgress();
+
+    if (pageAutoReloadBadgePointerHandler) {
+      window.removeEventListener(
+        "pointerdown",
+        pageAutoReloadBadgePointerHandler,
+        true
+      );
+    }
+    if (pageAutoReloadBadgeKeyboardHandler) {
+      window.removeEventListener(
+        "click",
+        pageAutoReloadBadgeKeyboardHandler,
+        true
+      );
+    }
+
+    pageAutoReloadBadgePointerHandler = null;
+    pageAutoReloadBadgeKeyboardHandler = null;
+    pageAutoReloadBadgeHost?.remove();
+    pageAutoReloadBadgeHost = null;
+    pageAutoReloadBadgeButton = null;
+    pageAutoReloadBadgeText = null;
+    pageAutoReloadBadgeProgress = null;
+    pageAutoReloadBadgeError = null;
+  }
+
+  function stopPageAutoReloadProgress() {
+    clearInterval(pageAutoReloadProgressTimer);
+    pageAutoReloadProgressTimer = null;
+    pageAutoReloadDeadline = null;
+    pageAutoReloadDurationMs = 0;
+  }
+
+  function updatePageAutoReloadBadge() {
+    if (
+      !pageAutoReloadBadgeButton ||
+      !pageAutoReloadBadgeText ||
+      !pageAutoReloadBadgeProgress
+    ) {
+      return;
+    }
+
+    pageAutoReloadBadgeButton.dataset.enabled = String(pageAutoReloadEnabled);
+    pageAutoReloadBadgeButton.dataset.busy = String(pageAutoReloadBadgeBusy);
+    pageAutoReloadBadgeButton.dataset.error = String(
+      Boolean(pageAutoReloadBadgeError)
+    );
+    pageAutoReloadBadgeButton.setAttribute(
+      "aria-pressed",
+      String(pageAutoReloadEnabled)
+    );
+
+    if (pageAutoReloadBadgeError) {
+      pageAutoReloadBadgeText.textContent = pageAutoReloadBadgeError;
+      pageAutoReloadBadgeProgress.style.transform = "scaleX(0)";
+      pageAutoReloadBadgeButton.title = "Нажмите, чтобы повторить";
+      return;
+    }
+
+    if (pageAutoReloadBadgeBusy) {
+      pageAutoReloadBadgeText.textContent = "Изменение автообновления…";
+      pageAutoReloadBadgeButton.title = "Сохранение настройки";
+      return;
+    }
+
+    if (!pageAutoReloadEnabled) {
+      pageAutoReloadBadgeText.textContent = "Автообновление выключено";
+      pageAutoReloadBadgeProgress.style.transform = "scaleX(0)";
+      pageAutoReloadBadgeButton.title = "Нажмите, чтобы включить";
+      return;
+    }
+
+    const remainingMs = pageAutoReloadDeadline
+      ? Math.max(0, pageAutoReloadDeadline - Date.now())
+      : pageAutoReloadSeconds * 1000;
+    const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+    const ratio = pageAutoReloadDurationMs
+      ? remainingMs / pageAutoReloadDurationMs
+      : 1;
+
+    pageAutoReloadBadgeText.textContent =
+      `Автообновление включено · ${remainingSeconds} сек`;
+    pageAutoReloadBadgeProgress.style.transform =
+      `scaleX(${Math.max(0, Math.min(1, ratio)).toFixed(4)})`;
+    pageAutoReloadBadgeButton.title = "Нажмите, чтобы выключить";
+  }
+
+  async function togglePageAutoReloadFromBadge() {
+    if (pageAutoReloadBadgeBusy) {
+      return;
+    }
+
+    const previousEnabled = pageAutoReloadEnabled;
+    const targetEnabled = !previousEnabled;
+
+    pageAutoReloadBadgeBusy = true;
+    pageAutoReloadBadgeError = null;
+    pageAutoReloadEnabled = targetEnabled;
+    updatePageAutoReloadBadge();
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "SAVE_SETTINGS",
+        settings: {
+          pageAutoReloadEnabled: targetEnabled
+        }
+      });
+
+      if (!response?.ok) {
+        throw new Error(response?.error || "Не удалось сохранить настройку");
+      }
+
+      pageAutoReloadEnabled = Boolean(
+        response.settings?.pageAutoReloadEnabled
+      );
+      pageAutoReloadBadgeBusy = false;
+      await configurePageAutoReload();
+    } catch {
+      pageAutoReloadEnabled = previousEnabled;
+      pageAutoReloadBadgeBusy = false;
+      pageAutoReloadBadgeError = "Не удалось изменить автообновление";
+      updatePageAutoReloadBadge();
+
+      setTimeout(() => {
+        pageAutoReloadBadgeError = null;
+        updatePageAutoReloadBadge();
+      }, 2500);
     }
   }
 
