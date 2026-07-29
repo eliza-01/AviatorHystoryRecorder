@@ -19,7 +19,7 @@ class AnalysisStats(BaseModel):
     positive_rate: float = Field(ge=0, le=100)
     negative_rate: float = Field(ge=0, le=100)
     weighted_positive: float
-    requested_result: float
+    historical_minimum: float
     chart_result: float
     points_returned: int = Field(ge=0)
 

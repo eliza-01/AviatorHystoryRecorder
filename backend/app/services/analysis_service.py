@@ -15,6 +15,7 @@ class AnalysisService:
         rows = await self._repository.list_for_analysis()
         win_delta = threshold - Decimal("1")
         balance = Decimal("0")
+        historical_minimum = Decimal("0")
         positive = 0
         negative = 0
         points: list[AnalysisPoint] = []
@@ -28,6 +29,7 @@ class AnalysisService:
                 delta = Decimal("-1")
 
             balance += delta
+            historical_minimum = min(historical_minimum, balance)
             points.append(
                 AnalysisPoint(
                     index=index,
@@ -43,9 +45,8 @@ class AnalysisService:
         negative_rate = (negative / total * 100) if total else 0.0
         weighted_positive = Decimal(positive) * win_delta
 
-        # Формула пользователя, отдельная от результата графика:
-        # положительные * (x - 1) - отрицательные.
-        requested_result = Decimal(positive) * win_delta - Decimal(negative)
+        # Минимальное значение накопительного баланса за всю историю.
+        # Стартовая точка с балансом 0 также учитывается.
 
         stats = AnalysisStats(
             x=float(threshold),
@@ -55,7 +56,7 @@ class AnalysisService:
             positive_rate=positive_rate,
             negative_rate=negative_rate,
             weighted_positive=float(weighted_positive),
-            requested_result=float(requested_result),
+            historical_minimum=float(historical_minimum),
             chart_result=float(balance),
             points_returned=len(points),
         )

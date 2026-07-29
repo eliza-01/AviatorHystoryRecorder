@@ -45,7 +45,7 @@
     negativeRate: document.getElementById("stat-negative-rate"),
     comparisonNegative: document.getElementById("stat-comparison-negative"),
     comparisonPositive: document.getElementById("stat-comparison-positive"),
-    requestedResult: document.getElementById("stat-requested-result"),
+    historicalMinimum: document.getElementById("stat-historical-minimum"),
     chartResult: document.getElementById("stat-chart-result")
   };
 
@@ -822,10 +822,10 @@
     fields.negativeRate.textContent = `${percentFormatter.format(stats.negative_rate)}%`;
     fields.comparisonNegative.textContent = formatNumber(stats.negative);
     fields.comparisonPositive.textContent = formatNumber(stats.weighted_positive);
-    fields.requestedResult.textContent = formatSigned(stats.requested_result);
+    fields.historicalMinimum.textContent = formatSigned(stats.historical_minimum);
     fields.chartResult.textContent = formatSigned(stats.chart_result);
 
-    toggleSignedClass(fields.requestedResult, stats.requested_result);
+    toggleSignedClass(fields.historicalMinimum, stats.historical_minimum);
     toggleSignedClass(fields.chartResult, stats.chart_result);
   }
 
