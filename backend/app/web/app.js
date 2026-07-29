@@ -30,6 +30,7 @@
   const chart = document.getElementById("result-chart");
   const chartYAxis = document.getElementById("chart-y-axis");
   const crosshairYValue = document.getElementById("crosshair-y-value");
+  const crosshairXTime = document.getElementById("crosshair-x-time");
   const chartXAxis = document.getElementById("chart-x-axis");
   const chartAxisCorner = document.getElementById("chart-axis-corner");
   const manualLinesLayer = document.getElementById("manual-lines-layer");
@@ -185,6 +186,7 @@
   chartViewport.addEventListener("scroll", () => {
     tooltip.hidden = true;
     setElementHidden(crosshairYValue, true);
+    setElementHidden(crosshairXTime, true);
     scheduleStickyAxesRender();
   });
 
@@ -841,6 +843,7 @@
     cancelChartPan();
     tooltip.hidden = true;
     setElementHidden(crosshairYValue, true);
+    setElementHidden(crosshairXTime, true);
     chart.innerHTML = "";
 
     if (!Array.isArray(points) || points.length === 0) {
@@ -1081,9 +1084,11 @@
         horizontalHoverLine.setAttribute("y1", localY);
         horizontalHoverLine.setAttribute("y2", localY);
         showCrosshairYValue(localY);
+        showCrosshairXTime(point, pointX);
       } else {
         setElementHidden(horizontalHoverLine, true);
         setElementHidden(crosshairYValue, true);
+        setElementHidden(crosshairXTime, true);
       }
 
       const isPointHovered = !freeCrosshair ||
@@ -1140,6 +1145,7 @@
       setElementHidden(hoverLine, true);
       setElementHidden(horizontalHoverLine, true);
       setElementHidden(crosshairYValue, true);
+      setElementHidden(crosshairXTime, true);
       setElementHidden(hoverDot, true);
       tooltip.hidden = true;
     });
@@ -1292,6 +1298,7 @@
     setElementHidden(chart.querySelector("#hover-horizontal-line"), true);
     setElementHidden(chart.querySelector("#hover-dot"), true);
     setElementHidden(crosshairYValue, true);
+    setElementHidden(crosshairXTime, true);
     tooltip.hidden = true;
   }
 
@@ -1317,6 +1324,45 @@
     top = Math.max(8, Math.min(top, chartViewport.clientHeight - tooltipHeight - 8));
     tooltip.style.left = `${left}px`;
     tooltip.style.top = `${top}px`;
+  }
+
+  function showCrosshairXTime(point, contentX) {
+    if (!currentAxisModel || !crosshairEnabled.checked) {
+      setElementHidden(crosshairXTime, true);
+      return;
+    }
+
+    const label = formatGraphPointShortDate(point?.occurred_at);
+    if (!label) {
+      setElementHidden(crosshairXTime, true);
+      return;
+    }
+
+    const viewportX = contentX - chartViewport.scrollLeft;
+    if (viewportX < 0 || viewportX > chartViewport.clientWidth) {
+      setElementHidden(crosshairXTime, true);
+      return;
+    }
+
+    crosshairXTime.textContent = label;
+    setElementHidden(crosshairXTime, false);
+
+    const badgeWidth = crosshairXTime.offsetWidth || 92;
+    const badgeHeight = crosshairXTime.offsetHeight || 24;
+    const horizontalPadding = 4;
+    const clampedX = clamp(
+      viewportX,
+      badgeWidth / 2 + horizontalPadding,
+      chartViewport.clientWidth - badgeWidth / 2 - horizontalPadding
+    );
+    const scrollbarHeight = Math.max(
+      chartViewport.offsetHeight - chartViewport.clientHeight,
+      0
+    );
+    const plotBottom = scrollbarHeight + currentAxisModel.margin.bottom;
+
+    crosshairXTime.style.left = `${clampedX}px`;
+    crosshairXTime.style.bottom = `${Math.max(plotBottom - badgeHeight / 2, 0)}px`;
   }
 
   function showCrosshairYValue(contentY) {
@@ -1363,6 +1409,7 @@
         setElementHidden(horizontalHoverLine, true);
       }
       setElementHidden(crosshairYValue, true);
+      setElementHidden(crosshairXTime, true);
     }
   }
 
@@ -2029,6 +2076,23 @@
       return `${formatNumber(numeric / 1_000)}k`;
     }
     return formatNumber(numeric);
+  }
+
+  function formatGraphPointShortDate(value) {
+    const serverDate = parseServerTimestamp(value);
+    if (!serverDate) {
+      return "";
+    }
+
+    const shiftedDate = new Date(
+      serverDate.getTime() + utcOffsetHours * 60 * 60 * 1000
+    );
+    const day = String(shiftedDate.getUTCDate()).padStart(2, "0");
+    const month = String(shiftedDate.getUTCMonth() + 1).padStart(2, "0");
+    const hours = String(shiftedDate.getUTCHours()).padStart(2, "0");
+    const minutes = String(shiftedDate.getUTCMinutes()).padStart(2, "0");
+
+    return `${day}.${month} ${hours}:${minutes}`;
   }
 
   function formatGraphPointDate(value) {
