@@ -11,6 +11,8 @@
   const STATUS_INTERVAL_MS = 3000;
   const MIN_AUTO_RELOAD_SECONDS = 5;
   const MAX_AUTO_RELOAD_SECONDS = 86_400;
+  const STRATEGY_HISTORY_CHANNEL = "aviator-strategy-history-v1";
+  const STRATEGY_HISTORY_SOURCE = "aviator-history-scanner";
 
   let persistedState = null;
   let persistedStateLoaded = false;
@@ -35,6 +37,12 @@
   let pageAutoReloadBadgeError = null;
   let pageAutoReloadBadgePointerHandler = null;
   let pageAutoReloadBadgeKeyboardHandler = null;
+  let pageAutoReloadSuspendedByStrategy = false;
+  let strategyEnabled = false;
+  let strategyRuntimeState = null;
+  let strategyBadgeHost = null;
+  let strategyBadgeText = null;
+  let strategyBadgeProgress = null;
   let topPageReady = document.readyState === "complete";
 
   start();
@@ -61,10 +69,18 @@
     }
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName !== "local" || !changes.settings || !topPageReady) {
+      if (areaName !== "local" || !topPageReady) {
         return;
       }
-      void configurePageAutoReload();
+
+      if (changes.settings) {
+        void configurePageAutoReload();
+        return;
+      }
+
+      if (changes.strategyStates) {
+        void refreshStrategyRuntimeStatus();
+      }
     });
 
     if (topPageReady) {
@@ -82,6 +98,36 @@
     );
   }
 
+  async function refreshStrategyRuntimeStatus() {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "GET_CAPTURE_STATE",
+        pageUrl: location.href
+      });
+
+      if (!response?.ok || !response.aviatorTab) {
+        removeStrategyBadge();
+        return;
+      }
+
+      const previousSuspended = pageAutoReloadSuspendedByStrategy;
+      strategyEnabled = Boolean(response.strategyTenPlusX348Enabled);
+      strategyRuntimeState = response.strategyState || null;
+      pageAutoReloadSuspendedByStrategy = Boolean(
+        strategyEnabled && strategyRuntimeState?.autoReloadPaused
+      );
+
+      updateStrategyBadge();
+      updatePageAutoReloadBadge();
+
+      if (previousSuspended !== pageAutoReloadSuspendedByStrategy) {
+        await configurePageAutoReload();
+      }
+    } catch {
+      // Старый content script мог потерять контекст после обновления расширения.
+    }
+  }
+
   async function configurePageAutoReload() {
     clearTimeout(pageAutoReloadTimer);
     pageAutoReloadTimer = null;
@@ -95,6 +141,7 @@
 
       if (!response?.ok || !response.aviatorTab) {
         removePageAutoReloadBadge();
+        removeStrategyBadge();
         return;
       }
 
@@ -105,11 +152,17 @@
         60
       );
       pageAutoReloadEnabled = Boolean(response.pageAutoReloadEnabled);
+      strategyEnabled = Boolean(response.strategyTenPlusX348Enabled);
+      strategyRuntimeState = response.strategyState || null;
+      pageAutoReloadSuspendedByStrategy = Boolean(
+        strategyEnabled && strategyRuntimeState?.autoReloadPaused
+      );
       pageAutoReloadBadgeError = null;
 
       ensurePageAutoReloadBadge();
+      updateStrategyBadge();
 
-      if (!pageAutoReloadEnabled) {
+      if (!pageAutoReloadEnabled || pageAutoReloadSuspendedByStrategy) {
         updatePageAutoReloadBadge();
         return;
       }
@@ -381,6 +434,15 @@
       return;
     }
 
+    if (pageAutoReloadSuspendedByStrategy) {
+      pageAutoReloadBadgeText.textContent =
+        "Автообновление приостановлено стратегией";
+      pageAutoReloadBadgeProgress.style.transform = "scaleX(0)";
+      pageAutoReloadBadgeButton.title =
+        "Возобновится после сброса сигнала, прибыли или стопа";
+      return;
+    }
+
     const remainingMs = pageAutoReloadDeadline
       ? Math.max(0, pageAutoReloadDeadline - Date.now())
       : pageAutoReloadSeconds * 1000;
@@ -397,6 +459,11 @@
   }
 
   async function togglePageAutoReloadFromBadge() {
+    if (pageAutoReloadSuspendedByStrategy) {
+      updatePageAutoReloadBadge();
+      return;
+    }
+
     if (pageAutoReloadBadgeBusy) {
       return;
     }
@@ -437,6 +504,145 @@
         updatePageAutoReloadBadge();
       }, 2500);
     }
+  }
+
+  function updateStrategyBadge() {
+    if (!strategyEnabled) {
+      removeStrategyBadge();
+      return;
+    }
+
+    ensureStrategyBadge();
+    if (!strategyBadgeText || !strategyBadgeProgress) {
+      return;
+    }
+
+    const state = strategyRuntimeState || {};
+    const streak = Math.max(0, Number(state.consecutiveLosses || 0));
+    const progress = Math.max(0, Math.min(1, streak / 10));
+    const stage = String(state.stage || "waiting");
+
+    if (stage === "error") {
+      strategyBadgeText.textContent = `10+ - x3.48 · ошибка: ${
+        state.error || "проверьте интерфейс"
+      }`;
+    } else if (state.awaitingResult) {
+      strategyBadgeText.textContent =
+        `10+ - x3.48 · шаг ${state.step || 1} · ставка ${formatBadgeNumber(
+          state.activeBet || state.nextBet || 0.2
+        )} · ждём результат`;
+    } else if (["arming", "betting"].includes(stage)) {
+      strategyBadgeText.textContent =
+        `10+ - x3.48 · ${state.message || "подготовка ставки"}`;
+    } else {
+      strategyBadgeText.textContent =
+        `10+ - x3.48 · серия ${Math.min(streak, 10)}/10`;
+    }
+
+    strategyBadgeProgress.style.transform = `scaleX(${progress.toFixed(4)})`;
+  }
+
+  function ensureStrategyBadge() {
+    if (strategyBadgeHost?.isConnected) {
+      return;
+    }
+
+    const host = document.createElement("div");
+    host.id = "aviator-extension-strategy-badge";
+    host.style.cssText = [
+      "position:fixed",
+      "top:54px",
+      "left:50%",
+      "transform:translateX(-50%)",
+      "z-index:2147483646",
+      "display:block",
+      "max-width:calc(100vw - 20px)",
+      "pointer-events:none"
+    ].join(";");
+
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = `
+      .badge {
+        position: relative;
+        box-sizing: border-box;
+        min-width: 250px;
+        max-width: calc(100vw - 20px);
+        overflow: hidden;
+        padding: 8px 14px 11px;
+        border: 1px solid rgba(119, 179, 255, 0.72);
+        border-radius: 999px;
+        background: rgba(20, 23, 28, 0.94);
+        box-shadow: 0 5px 18px rgba(0, 0, 0, 0.32);
+        color: #ffffff;
+        font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: center;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      .text {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .progress-track {
+        position: absolute;
+        right: 8px;
+        bottom: 4px;
+        left: 8px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.18);
+      }
+      .progress-value {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border-radius: inherit;
+        background: #77b3ff;
+        transform: scaleX(0);
+        transform-origin: left center;
+        transition: transform 180ms linear;
+      }
+      @media (max-width: 360px) {
+        .badge { min-width: 0; width: calc(100vw - 20px); }
+      }
+    `;
+
+    const badge = document.createElement("div");
+    badge.className = "badge";
+    badge.setAttribute("aria-live", "polite");
+
+    const text = document.createElement("span");
+    text.className = "text";
+    const track = document.createElement("span");
+    track.className = "progress-track";
+    const progress = document.createElement("span");
+    progress.className = "progress-value";
+    track.append(progress);
+    badge.append(text, track);
+    shadow.append(style, badge);
+
+    strategyBadgeHost = host;
+    strategyBadgeText = text;
+    strategyBadgeProgress = progress;
+    (document.documentElement || document).append(host);
+  }
+
+  function removeStrategyBadge() {
+    strategyBadgeHost?.remove();
+    strategyBadgeHost = null;
+    strategyBadgeText = null;
+    strategyBadgeProgress = null;
+    strategyRuntimeState = null;
+    pageAutoReloadSuspendedByStrategy = false;
+  }
+
+  function formatBadgeNumber(value) {
+    return Number(value || 0).toFixed(2);
   }
 
   function clampInteger(value, minimum, maximum, fallback) {
@@ -566,6 +772,7 @@
 
     if (!isValidState(persistedState)) {
       const ids = await createIds(values);
+      notifyStrategySnapshot(values, ids, "initial");
       const accepted = await emitResults(
         values,
         ids,
@@ -600,6 +807,7 @@
     const previousIds = persistedState.ids;
 
     if (arraysEqual(values, previousValues)) {
+      notifyStrategySnapshot(values, previousIds, "unchanged");
       reportStatus({
         stage: "unchanged",
         historyFound: true,
@@ -614,6 +822,7 @@
       // После долгого простоя весь экран истории может смениться. Считаем его
       // новой базовой точкой, но не отправляем 30 потенциальных дублей.
       const ids = await createIds(values);
+      notifyStrategySnapshot(values, ids, "resync");
       await storeState(values, ids);
       reportStatus({
         stage: "resynced-without-send",
@@ -626,6 +835,7 @@
 
     const insertedCount = alignment.currentOffset;
     const ids = await mergeIds(values, previousIds, alignment);
+    notifyStrategySnapshot(values, ids, insertedCount > 0 ? "prepend" : "aligned");
 
     if (insertedCount === 0) {
       await storeState(values, ids);
@@ -669,6 +879,27 @@
       accepted,
       newestValues: newValues.slice(0, 5)
     }, true);
+  }
+
+  function notifyStrategySnapshot(values, ids, reason) {
+    if (!Array.isArray(values) || !Array.isArray(ids) || values.length !== ids.length) {
+      return;
+    }
+
+    window.postMessage(
+      {
+        channel: STRATEGY_HISTORY_CHANNEL,
+        source: STRATEGY_HISTORY_SOURCE,
+        type: "SNAPSHOT",
+        snapshot: {
+          values: values.slice(),
+          ids: ids.slice(),
+          reason,
+          observedAt: new Date().toISOString()
+        }
+      },
+      "*"
+    );
   }
 
   function findBestAlignment(current, previous) {

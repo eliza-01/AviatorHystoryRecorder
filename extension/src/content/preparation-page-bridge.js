@@ -4,6 +4,7 @@
   const GAME_HOST_PATTERN = /(^|\.)spribegaming\.com$/i;
   const CHANNEL = "aviator-preparation-v2";
   const CONTROLLER_SOURCE = "aviator-preparation-controller";
+  const STRATEGY_CONTROLLER_SOURCE = "aviator-strategy-controller";
   const BRIDGE_SOURCE = "aviator-preparation-page-bridge";
   const POLL_INTERVAL_MS = 120;
   const GAME_READY_TIMEOUT_MS = 60_000;
@@ -27,7 +28,7 @@
     if (
       !message ||
       message.channel !== CHANNEL ||
-      message.source !== CONTROLLER_SOURCE
+      ![CONTROLLER_SOURCE, STRATEGY_CONTROLLER_SOURCE].includes(message.source)
     ) {
       return;
     }
@@ -42,7 +43,7 @@
       return;
     }
 
-    if (message.type !== "PREPARE") {
+    if (!["PREPARE", "PREPARE_AND_BET"].includes(message.type)) {
       return;
     }
 
@@ -53,10 +54,15 @@
       cashout: normalizePositiveNumber(message.settings?.cashout, 2)
     };
 
-    void runPreparation(run, requestId, settings);
+    void runPreparation(
+      run,
+      requestId,
+      settings,
+      message.type === "PREPARE_AND_BET"
+    );
   }
 
-  async function runPreparation(run, requestId, settings) {
+  async function runPreparation(run, requestId, settings, placeBetAfterPreparation) {
     try {
       emitStage(requestId, "waiting-game", settings);
       await waitFor(() => findPrimaryBetControl(), GAME_READY_TIMEOUT_MS, run);
@@ -72,6 +78,11 @@
 
       emitStage(requestId, "setting-bet", settings);
       await setBetValue(settings.bet, run);
+
+      if (placeBetAfterPreparation) {
+        emitStage(requestId, "placing-bet", settings);
+        await placeBet(run);
+      }
 
       ensureActiveRun(run);
       postMessageToController("PREPARE_RESULT", requestId, {
@@ -214,6 +225,20 @@
     });
   }
 
+  async function placeBet(run) {
+    const state = await waitFor(() => {
+      const current = findBetButtonState();
+      return current?.ready ? current : null;
+    }, GAME_READY_TIMEOUT_MS, run);
+
+    ensureActiveRun(run);
+    performClick(state.button);
+
+    // Повторно кнопку не нажимаем: после физического клика любое повторение
+    // потенциально может отменить уже принятую ставку.
+    await delay(250, run);
+  }
+
   async function setAngularInputValue({
     value,
     run,
@@ -341,6 +366,30 @@
         ".controls-content-top .bet-block app-spinner .spinner.big input[inputmode='decimal']"
       ) || null
     );
+  }
+
+  function findBetButtonState() {
+    const control = findPrimaryBetControl();
+    const button = control?.querySelector(
+      ".controls-content-top .buttons-block button.bet"
+    );
+
+    if (!(button instanceof HTMLButtonElement) || !isDisplayed(button)) {
+      return null;
+    }
+
+    const label = normalizeText(
+      button.querySelector(".label")?.textContent || button.textContent
+    );
+    const disabled =
+      Boolean(button.disabled) ||
+      button.classList.contains("disabled") ||
+      button.getAttribute("aria-disabled") === "true";
+
+    return {
+      button,
+      ready: !disabled && /^ставка$/i.test(label)
+    };
   }
 
   async function writeInputValue(input, text, run, forceScriptedTyping) {

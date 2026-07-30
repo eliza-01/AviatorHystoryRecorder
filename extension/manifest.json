@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Aviator History Recorder",
-  "version": "1.5.6",
-  "description": "Сохраняет результаты Aviator, настраивает интерфейс игры и умеет автоматически перезагружать вкладку.",
+  "version": "1.6.1",
+  "description": "Сохраняет результаты Aviator, управляет подготовкой, стратегиями ставок и автообновлением вкладки.",
   "permissions": [
     "storage",
     "alarms"
@@ -41,7 +41,8 @@
       ],
       "js": [
         "src/content/content-script.js",
-        "src/content/preparation-script.js"
+        "src/content/preparation-script.js",
+        "src/content/strategy-script.js"
       ],
       "run_at": "document_start",
       "all_frames": true,

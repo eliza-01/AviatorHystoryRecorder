@@ -23,6 +23,32 @@
       <input id="apiBaseUrl" type="url" autocomplete="off" spellcheck="false">
     </label>
 
+    <section class="strategies-section" aria-labelledby="strategies-title">
+      <h2 id="strategies-title">Стратегии</h2>
+      <article class="strategy-card">
+        <label class="switch-row strategy-switch">
+          <span>10+ - x3.48</span>
+          <input id="strategyTenPlusX348Enabled" type="checkbox">
+        </label>
+
+        <div class="strategy-summary">
+          <span>Сигнал: 10 результатов ≤ 3.48</span>
+          <span>Старт: 0.20 · цель прибыли: 0.20</span>
+        </div>
+
+        <label class="field strategy-stop-field">
+          <span>Стоп после проигрыша на шаге</span>
+          <select id="strategyTenPlusX348StopStep" disabled></select>
+          <small id="strategyStopDetails" class="strategy-stop-details"></small>
+        </label>
+
+        <button id="strategyDescription" type="button" class="secondary strategy-description">
+          Описание
+        </button>
+        <small id="strategyStatus">Стратегия выключена</small>
+      </article>
+    </section>
+
     <section class="preparation-card" aria-labelledby="preparation-title">
       <label class="switch-row preparation-switch">
         <span id="preparation-title">Подготовка</span>
@@ -112,6 +138,25 @@
 
     <p id="status" class="status">Загрузка…</p>
   </main>
+
+  <dialog id="strategyDescriptionDialog" class="strategy-dialog">
+    <div class="strategy-dialog-header">
+      <strong>10+ - x3.48</strong>
+      <button id="strategyDescriptionClose" type="button" class="secondary">Закрыть</button>
+    </div>
+    <ol>
+      <li>Стратегия считает подряд результаты, которые меньше либо равны 3.48.</li>
+      <li>На значении 8/10 автообновление страницы приостанавливается.</li>
+      <li>Если до 10/10 выпадает результат выше 3.48, счётчик сбрасывается, а автообновление возобновляется.</li>
+      <li>После 10/10 стратегия проверяет вкладку «Авто», авто кешаут 3.48 и сумму ставки 0.20.</li>
+      <li>Ставка ставится на следующий раунд нажатием штатной кнопки «Ставка».</li>
+      <li>Результат строго выше 3.48 считается победой. Выплата рассчитывается по фиксированному кэшауту 3.48.</li>
+      <li>После проигрыша следующая ставка округляется вверх до шага 0.01 так, чтобы вернуть весь минус и получить не менее 0.20.</li>
+      <li>При выбранном стопе цикл завершается после проигрыша на указанном шаге.</li>
+      <li>После прибыли не менее 0.20 или достижения стопа ставки прекращаются, счётчик начинается заново, автообновление возобновляется.</li>
+    </ol>
+  </dialog>
+
   <script type="module" src="popup.js"></script>
 </body>
 </html>

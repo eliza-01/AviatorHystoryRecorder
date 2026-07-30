@@ -6,6 +6,7 @@ const MIN_PREPARATION_BET = 0.01;
 const MAX_PREPARATION_BET = 999_999_999;
 const MIN_PREPARATION_CASHOUT = 1.01;
 const MAX_PREPARATION_CASHOUT = 1_000_000;
+const MAX_STRATEGY_STOP_STEP = 100;
 
 export async function getSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.settings);
@@ -68,6 +69,15 @@ export function normalizePreparationCashout(value) {
   );
 }
 
+export function normalizeStrategyStopStep(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+
+  return Math.min(MAX_STRATEGY_STOP_STEP, Math.max(1, Math.round(parsed)));
+}
+
 function sanitizeSettings(value) {
   const settings = {
     ...DEFAULT_SETTINGS,
@@ -81,12 +91,23 @@ function sanitizeSettings(value) {
   settings.pageAutoReloadSeconds = normalizeAutoReloadSeconds(
     settings.pageAutoReloadSeconds
   );
+  settings.strategyTenPlusX348Enabled = Boolean(
+    settings.strategyTenPlusX348Enabled
+  );
+  settings.strategyTenPlusX348StopStep = normalizeStrategyStopStep(
+    settings.strategyTenPlusX348StopStep
+  );
   settings.preparationEnabled = Boolean(settings.preparationEnabled);
   settings.preparationBet = normalizePreparationBet(settings.preparationBet);
   settings.preparationCashout = normalizePreparationCashout(
     settings.preparationCashout
   );
   settings.apiBaseUrl = normalizeApiBaseUrl(settings.apiBaseUrl);
+
+  // Активная стратегия полностью управляет первым блоком ставки.
+  if (settings.strategyTenPlusX348Enabled) {
+    settings.preparationEnabled = false;
+  }
 
   return settings;
 }

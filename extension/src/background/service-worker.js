@@ -17,12 +17,15 @@ import { isAviatorTabUrl } from "./url-service.js";
 const FLUSH_ALARM = "flush-aviator-queues";
 const COLLECTOR_FRAME_TTL_MS = 10 * 60 * 1000;
 const PREPARATION_FRAME_TTL_MS = 10 * 60 * 1000;
+const STRATEGY_STATE_TTL_MS = 24 * 60 * 60 * 1000;
+const STRATEGY_ID = "ten-plus-x348";
 
 chrome.runtime.onInstalled.addListener(async () => {
   await getSettings();
   await chrome.storage.local.remove([
     STORAGE_KEYS.collectorFrames,
-    STORAGE_KEYS.preparationFrames
+    STORAGE_KEYS.preparationFrames,
+    STORAGE_KEYS.strategyStates
   ]);
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
 });
@@ -67,14 +70,17 @@ async function handleMessage(message, sender) {
     case "PREPARATION_STATUS":
       return savePreparationStatus(sender, message);
 
+    case "GET_STRATEGY_STATE":
+      return getStrategyState(sender, message);
+
+    case "SAVE_STRATEGY_STATE":
+      return saveStrategyState(sender, message);
+
     case "GET_POPUP_STATE":
       return getPopupState();
 
     case "SAVE_SETTINGS":
-      return {
-        ok: true,
-        settings: await saveSettings(message.settings || {})
-      };
+      return saveExtensionSettings(message.settings || {});
 
     case "TEST_CONNECTION":
       return {
@@ -98,6 +104,7 @@ async function getCaptureState(sender, message) {
   const settings = await getSettings();
   const topUrl = sender.tab?.url || message.pageUrl || "";
   const aviatorTab = isAviatorTabUrl(topUrl);
+  const strategyState = await getStrategyStateForTab(sender.tab?.id, topUrl);
 
   return {
     ok: true,
@@ -112,7 +119,14 @@ async function getCaptureState(sender, message) {
       settings.preparationEnabled && aviatorTab
     ),
     preparationBet: Number(settings.preparationBet),
-    preparationCashout: Number(settings.preparationCashout)
+    preparationCashout: Number(settings.preparationCashout),
+    strategyTenPlusX348Enabled: Boolean(
+      settings.strategyTenPlusX348Enabled && aviatorTab
+    ),
+    strategyTenPlusX348StopStep: Number(
+      settings.strategyTenPlusX348StopStep || 0
+    ),
+    strategyState
   };
 }
 
@@ -223,14 +237,21 @@ async function saveCollectorStatus(sender, message) {
 }
 
 async function getPopupState() {
-  const [settings, stats, queues, collectorStored, preparationStored] =
-    await Promise.all([
-      getSettings(),
-      getStats(),
-      getQueueSizes(),
-      chrome.storage.local.get(STORAGE_KEYS.collectorFrames),
-      chrome.storage.local.get(STORAGE_KEYS.preparationFrames)
-    ]);
+  const [
+    settings,
+    stats,
+    queues,
+    collectorStored,
+    preparationStored,
+    strategyStored
+  ] = await Promise.all([
+    getSettings(),
+    getStats(),
+    getQueueSizes(),
+    chrome.storage.local.get(STORAGE_KEYS.collectorFrames),
+    chrome.storage.local.get(STORAGE_KEYS.preparationFrames),
+    chrome.storage.local.get(STORAGE_KEYS.strategyStates)
+  ]);
 
   return {
     ok: true,
@@ -243,6 +264,9 @@ async function getPopupState() {
     ),
     preparation: summarizePreparationFrames(
       preparationStored[STORAGE_KEYS.preparationFrames]
+    ),
+    strategy: summarizeStrategyStates(
+      strategyStored[STORAGE_KEYS.strategyStates]
     )
   };
 }
@@ -288,6 +312,152 @@ async function savePreparationStatus(sender, message) {
   });
 
   return { ok: true };
+}
+
+
+async function saveExtensionSettings(partialSettings) {
+  const previous = await getSettings();
+  const settings = await saveSettings(partialSettings);
+
+  const strategyConfigurationChanged =
+    previous.strategyTenPlusX348Enabled !==
+      settings.strategyTenPlusX348Enabled ||
+    previous.strategyTenPlusX348StopStep !==
+      settings.strategyTenPlusX348StopStep;
+
+  if (strategyConfigurationChanged) {
+    await chrome.storage.local.remove(STORAGE_KEYS.strategyStates);
+  }
+
+  return { ok: true, settings };
+}
+
+async function getStrategyState(sender) {
+  return {
+    ok: true,
+    state: await getStrategyStateForTab(
+      sender.tab?.id,
+      sender.tab?.url || message.pageUrl || ""
+    )
+  };
+}
+
+async function getStrategyStateForTab(tabId, topUrl = "") {
+  if (tabId === null || tabId === undefined) {
+    return null;
+  }
+
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyStates);
+  const states = cleanStrategyStates(stored[STORAGE_KEYS.strategyStates]);
+  const state = states[String(tabId)] || null;
+  if (!state) {
+    return null;
+  }
+
+  const expectedTopUrl = sanitizeStatusUrl(topUrl);
+  return expectedTopUrl && state.topUrl && state.topUrl !== expectedTopUrl
+    ? null
+    : state;
+}
+
+async function saveStrategyState(sender, message) {
+  const settings = await getSettings();
+  const tabId = sender.tab?.id;
+  const topUrl = sender.tab?.url || message.pageUrl || "";
+
+  if (tabId === null || tabId === undefined || !isAviatorTabUrl(topUrl)) {
+    return { ok: true, ignored: true };
+  }
+
+  if (!settings.strategyTenPlusX348Enabled) {
+    return { ok: true, ignored: true, reason: "strategy-disabled" };
+  }
+
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyStates);
+  const states = cleanStrategyStates(stored[STORAGE_KEYS.strategyStates]);
+  const state = sanitizeStrategyState(message.state, {
+    tabId,
+    frameId: sender.frameId ?? 0,
+    topUrl,
+    frameUrl: sender.url || message.frameUrl || ""
+  });
+
+  states[String(tabId)] = state;
+  await chrome.storage.local.set({ [STORAGE_KEYS.strategyStates]: states });
+
+  return { ok: true, state };
+}
+
+function cleanStrategyStates(value) {
+  const current = value && typeof value === "object" ? value : {};
+  const now = Date.now();
+  const cleaned = {};
+
+  for (const [key, state] of Object.entries(current)) {
+    const observedAt = Date.parse(state?.observedAt || "");
+    if (Number.isFinite(observedAt) && now - observedAt < STRATEGY_STATE_TTL_MS) {
+      cleaned[key] = state;
+    }
+  }
+
+  return cleaned;
+}
+
+function sanitizeStrategyState(value, context) {
+  const state = value && typeof value === "object" ? value : {};
+  const number = (candidate, fallback = 0) => {
+    const parsed = Number(candidate);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  return {
+    version: 1,
+    strategyId: STRATEGY_ID,
+    stage: String(state.stage || "waiting").slice(0, 64),
+    initialized: Boolean(state.initialized),
+    consecutiveLosses: Math.max(0, Math.round(number(state.consecutiveLosses))),
+    step: Math.max(0, Math.round(number(state.step))),
+    cumulativeLoss: Math.max(0, Number(number(state.cumulativeLoss).toFixed(2))),
+    nextBet: Math.max(0.2, Number(number(state.nextBet, 0.2).toFixed(2))),
+    activeBet:
+      state.activeBet === null || state.activeBet === undefined
+        ? null
+        : Math.max(0.2, Number(number(state.activeBet, 0.2).toFixed(2))),
+    awaitingResult: Boolean(state.awaitingResult),
+    autoReloadPaused: Boolean(state.autoReloadPaused),
+    lastProcessedRoundId: state.lastProcessedRoundId
+      ? String(state.lastProcessedRoundId).slice(0, 160)
+      : null,
+    lastMultiplier:
+      state.lastMultiplier === null || state.lastMultiplier === undefined
+        ? null
+        : Number(number(state.lastMultiplier).toFixed(2)),
+    lastCyclePnl:
+      state.lastCyclePnl === null || state.lastCyclePnl === undefined
+        ? null
+        : Number(number(state.lastCyclePnl).toFixed(4)),
+    completedCycles: Math.max(0, Math.round(number(state.completedCycles))),
+    stoppedCycles: Math.max(0, Math.round(number(state.stoppedCycles))),
+    error: state.error ? String(state.error).slice(0, 500) : null,
+    message: state.message ? String(state.message).slice(0, 500) : null,
+    configSignature: state.configSignature
+      ? String(state.configSignature).slice(0, 100)
+      : null,
+    tabId: context.tabId,
+    frameId: context.frameId,
+    topUrl: sanitizeStatusUrl(context.topUrl),
+    frameUrl: sanitizeStatusUrl(context.frameUrl),
+    observedAt: new Date().toISOString()
+  };
+}
+
+function summarizeStrategyStates(value) {
+  const states = Object.values(cleanStrategyStates(value)).sort(
+    (left, right) =>
+      Date.parse(right?.observedAt || "") - Date.parse(left?.observedAt || "")
+  );
+
+  return states[0] || null;
 }
 
 function summarizePreparationFrames(value) {

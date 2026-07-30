@@ -6,7 +6,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   pageAutoReloadSeconds: 60,
   preparationEnabled: false,
   preparationBet: 1,
-  preparationCashout: 2
+  preparationCashout: 2,
+  strategyTenPlusX348Enabled: false,
+  strategyTenPlusX348StopStep: 0
 });
 
 export const STORAGE_KEYS = Object.freeze({
@@ -15,7 +17,8 @@ export const STORAGE_KEYS = Object.freeze({
   sampleQueue: "sampleQueue",
   stats: "stats",
   collectorFrames: "collectorFrames",
-  preparationFrames: "preparationFrames"
+  preparationFrames: "preparationFrames",
+  strategyStates: "strategyStates"
 });
 
 export const MAX_RESULT_QUEUE_SIZE = 5000;
