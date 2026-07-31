@@ -35,3 +35,10 @@ export function sendSampleBatch(samples) {
     body: JSON.stringify({ samples })
   });
 }
+
+export function sendTelegramStrategyNotification(notification) {
+  return request("/api/v1/telegram/strategy-notification", {
+    method: "POST",
+    body: JSON.stringify(notification)
+  });
+}

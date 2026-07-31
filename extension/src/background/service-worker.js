@@ -1,4 +1,7 @@
-import { testApiConnection } from "./api-client.js";
+import {
+  sendTelegramStrategyNotification,
+  testApiConnection
+} from "./api-client.js";
 import { STORAGE_KEYS } from "./constants.js";
 import { flushQueues } from "./flush-service.js";
 import {
@@ -10,7 +13,11 @@ import {
   enqueueSamples,
   getQueueSizes
 } from "./queue-service.js";
-import { getSettings, saveSettings } from "./settings-service.js";
+import {
+  getSettings,
+  normalizeStrategyStopStep,
+  saveSettings
+} from "./settings-service.js";
 import { getStats } from "./stats-service.js";
 import { isAviatorTabUrl } from "./url-service.js";
 
@@ -18,15 +25,25 @@ const FLUSH_ALARM = "flush-aviator-queues";
 const COLLECTOR_FRAME_TTL_MS = 10 * 60 * 1000;
 const PREPARATION_FRAME_TTL_MS = 10 * 60 * 1000;
 const STRATEGY_STATE_TTL_MS = 24 * 60 * 60 * 1000;
+const STRATEGY_CONTROLLER_TTL_MS = 2 * 60 * 1000;
 const STRATEGY_ID = "ten-plus-x348";
+const strategyControllerLocks = new Map();
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   await getSettings();
-  await chrome.storage.local.remove([
+  const keys = [
     STORAGE_KEYS.collectorFrames,
     STORAGE_KEYS.preparationFrames,
-    STORAGE_KEYS.strategyStates
-  ]);
+    STORAGE_KEYS.strategyControllers
+  ];
+
+  // При обновлении сохраняем состояние активного цикла. Его удаление могло
+  // превратить уже идущую серию в новый ретроспективный сигнал.
+  if (details.reason === "install") {
+    keys.push(STORAGE_KEYS.strategyStates, STORAGE_KEYS.telegramStatus);
+  }
+
+  await chrome.storage.local.remove(keys);
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
 });
 
@@ -39,6 +56,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === FLUSH_ALARM) {
     void flushQueues();
   }
+});
+
+chrome.tabs?.onRemoved?.addListener((tabId) => {
+  void cleanupClosedTabRuntimeState(tabId);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -73,8 +94,20 @@ async function handleMessage(message, sender) {
     case "GET_STRATEGY_STATE":
       return getStrategyState(sender, message);
 
+    case "CLAIM_STRATEGY_CONTROLLER":
+      return claimStrategyController(sender, message);
+
+    case "VERIFY_STRATEGY_CONTROLLER":
+      return verifyStrategyController(sender, message);
+
+    case "RELEASE_STRATEGY_CONTROLLER":
+      return releaseStrategyController(sender, message);
+
     case "SAVE_STRATEGY_STATE":
       return saveStrategyState(sender, message);
+
+    case "SEND_STRATEGY_NOTIFICATION":
+      return sendStrategyNotification(sender, message);
 
     case "GET_POPUP_STATE":
       return getPopupState();
@@ -92,7 +125,10 @@ async function handleMessage(message, sender) {
       return flushQueues();
 
     case "RESET_DOM_STATE":
-      await chrome.storage.local.remove("aviatorDomHistoryStateV5");
+      await chrome.storage.local.remove([
+        "aviatorDomHistoryStateV5",
+        "aviatorDomHistoryStatesV6"
+      ]);
       return { ok: true };
 
     default:
@@ -125,6 +161,13 @@ async function getCaptureState(sender, message) {
     ),
     strategyTenPlusX348StopStep: Number(
       settings.strategyTenPlusX348StopStep || 0
+    ),
+    telegramConfigured: Boolean(settings.telegramChatId),
+    strategyTenPlusX348NotifySeriesEnabled: Boolean(
+      settings.strategyTenPlusX348NotifySeriesEnabled
+    ),
+    strategyTenPlusX348NotifySeriesLength: Number(
+      settings.strategyTenPlusX348NotifySeriesLength || 8
     ),
     strategyState
   };
@@ -243,14 +286,16 @@ async function getPopupState() {
     queues,
     collectorStored,
     preparationStored,
-    strategyStored
+    strategyStored,
+    telegramStored
   ] = await Promise.all([
     getSettings(),
     getStats(),
     getQueueSizes(),
     chrome.storage.local.get(STORAGE_KEYS.collectorFrames),
     chrome.storage.local.get(STORAGE_KEYS.preparationFrames),
-    chrome.storage.local.get(STORAGE_KEYS.strategyStates)
+    chrome.storage.local.get(STORAGE_KEYS.strategyStates),
+    chrome.storage.local.get(STORAGE_KEYS.telegramStatus)
   ]);
 
   return {
@@ -267,7 +312,8 @@ async function getPopupState() {
     ),
     strategy: summarizeStrategyStates(
       strategyStored[STORAGE_KEYS.strategyStates]
-    )
+    ),
+    telegram: telegramStored[STORAGE_KEYS.telegramStatus] || null
   };
 }
 
@@ -315,10 +361,97 @@ async function savePreparationStatus(sender, message) {
 }
 
 
+async function cleanupClosedTabRuntimeState(tabId) {
+  if (tabId === null || tabId === undefined) {
+    return;
+  }
+
+  await withStrategyControllerLock(tabId, async () => {
+    const stored = await chrome.storage.local.get([
+      STORAGE_KEYS.strategyStates,
+      STORAGE_KEYS.strategyControllers,
+      STORAGE_KEYS.collectorFrames,
+      STORAGE_KEYS.preparationFrames
+    ]);
+    const tabKey = String(tabId);
+    const states = cleanStrategyStates(stored[STORAGE_KEYS.strategyStates]);
+    const controllers = cleanStrategyControllers(
+      stored[STORAGE_KEYS.strategyControllers]
+    );
+    const collectorFrames = filterFrameStatusForOtherTabs(
+      stored[STORAGE_KEYS.collectorFrames],
+      tabKey
+    );
+    const preparationFrames = filterFrameStatusForOtherTabs(
+      stored[STORAGE_KEYS.preparationFrames],
+      tabKey
+    );
+
+    delete states[tabKey];
+    delete controllers[tabKey];
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.strategyStates]: states,
+      [STORAGE_KEYS.strategyControllers]: controllers,
+      [STORAGE_KEYS.collectorFrames]: collectorFrames,
+      [STORAGE_KEYS.preparationFrames]: preparationFrames
+    });
+  });
+}
+
+function filterFrameStatusForOtherTabs(value, closedTabKey) {
+  const current = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(
+    Object.entries(current).filter(([key, item]) => {
+      const itemTabId = item?.tabId;
+      if (itemTabId !== null && itemTabId !== undefined) {
+        return String(itemTabId) !== closedTabKey;
+      }
+      return !String(key).startsWith(`${closedTabKey}:`);
+    })
+  );
+}
+
 async function saveExtensionSettings(partialSettings) {
   const previous = await getSettings();
-  const settings = await saveSettings(partialSettings);
+  const requestedEnabled = Object.prototype.hasOwnProperty.call(
+    partialSettings,
+    "strategyTenPlusX348Enabled"
+  )
+    ? Boolean(partialSettings.strategyTenPlusX348Enabled)
+    : previous.strategyTenPlusX348Enabled;
+  const requestedStopStep = Object.prototype.hasOwnProperty.call(
+    partialSettings,
+    "strategyTenPlusX348StopStep"
+  )
+    ? normalizeStrategyStopStep(partialSettings.strategyTenPlusX348StopStep)
+    : previous.strategyTenPlusX348StopStep;
+  const criticalChangeRequested =
+    requestedEnabled !== previous.strategyTenPlusX348Enabled ||
+    requestedStopStep !== previous.strategyTenPlusX348StopStep;
 
+  if (criticalChangeRequested) {
+    const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyStates);
+    const activeState = Object.values(
+      cleanStrategyStates(stored[STORAGE_KEYS.strategyStates])
+    ).find((state) => {
+      const observedAt = Date.parse(state?.observedAt || "");
+      return (
+        isStrategyStateActive(state) &&
+        Number.isFinite(observedAt) &&
+        Date.now() - observedAt < 15 * 60 * 1000
+      );
+    });
+    if (activeState) {
+      return {
+        ok: false,
+        error:
+          "Нельзя выключить стратегию или изменить стоп во время размещённой/размещаемой ставки. " +
+          "Дождитесь результата текущего шага."
+      };
+    }
+  }
+
+  const settings = await saveSettings(partialSettings);
   const strategyConfigurationChanged =
     previous.strategyTenPlusX348Enabled !==
       settings.strategyTenPlusX348Enabled ||
@@ -326,13 +459,376 @@ async function saveExtensionSettings(partialSettings) {
       settings.strategyTenPlusX348StopStep;
 
   if (strategyConfigurationChanged) {
-    await chrome.storage.local.remove(STORAGE_KEYS.strategyStates);
+    await chrome.storage.local.remove([
+      STORAGE_KEYS.strategyStates,
+      STORAGE_KEYS.strategyControllers
+    ]);
+  }
+
+  if (previous.telegramChatId !== settings.telegramChatId) {
+    await chrome.storage.local.remove(STORAGE_KEYS.telegramStatus);
   }
 
   return { ok: true, settings };
 }
 
-async function getStrategyState(sender) {
+
+async function claimStrategyController(sender, message) {
+  const settings = await getSettings();
+  const tabId = sender.tab?.id;
+  const topUrl = sender.tab?.url || message.pageUrl || "";
+
+  if (
+    tabId === null ||
+    tabId === undefined ||
+    !isAviatorTabUrl(topUrl) ||
+    !settings.strategyTenPlusX348Enabled
+  ) {
+    return { ok: true, owner: false, reason: "strategy-unavailable" };
+  }
+
+  const frameId = sender.frameId ?? 0;
+  const score = Math.min(10_000, Math.max(0, Math.round(Number(message.score) || 0)));
+
+  return withStrategyControllerLock(tabId, async () => {
+    const stored = await chrome.storage.local.get([
+      STORAGE_KEYS.strategyControllers,
+      STORAGE_KEYS.strategyStates
+    ]);
+    const controllers = cleanStrategyControllers(
+      stored[STORAGE_KEYS.strategyControllers]
+    );
+    const states = cleanStrategyStates(stored[STORAGE_KEYS.strategyStates]);
+    const key = String(tabId);
+    const current = controllers[key] || null;
+    const currentState = states[key] || null;
+    const now = Date.now();
+    const expectedTopUrl = sanitizeStatusUrl(topUrl);
+    const currentAge = current
+      ? now - Date.parse(current.lastSeenAt || current.claimedAt || "")
+      : Number.POSITIVE_INFINITY;
+    const currentStale = !Number.isFinite(currentAge) || currentAge > STRATEGY_CONTROLLER_TTL_MS;
+    const sameFrame = Boolean(
+      current &&
+        current.frameId === frameId &&
+        (!current.topUrl || current.topUrl === expectedTopUrl)
+    );
+    const currentStateActive = isStrategyStateActive(currentState);
+    const canReplace = Boolean(
+      !current ||
+        currentStale ||
+        current.topUrl !== expectedTopUrl ||
+        (!currentStateActive && score > Number(current.score || 0))
+    );
+
+    if (sameFrame) {
+      const refreshed = {
+        ...current,
+        score: Math.max(Number(current.score || 0), score),
+        frameUrl: sanitizeStatusUrl(sender.url || message.frameUrl || ""),
+        lastSeenAt: new Date().toISOString()
+      };
+      controllers[key] = refreshed;
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.strategyControllers]: controllers
+      });
+      return {
+        ok: true,
+        owner: true,
+        controllerToken: refreshed.token,
+        ownerFrameId: frameId
+      };
+    }
+
+    if (!canReplace) {
+      return {
+        ok: true,
+        owner: false,
+        ownerFrameId: current.frameId,
+        reason: currentStateActive ? "active-owner-exists" : "better-owner-exists"
+      };
+    }
+
+    const controller = {
+      tabId,
+      frameId,
+      token: createControllerToken(),
+      score,
+      topUrl: expectedTopUrl,
+      frameUrl: sanitizeStatusUrl(sender.url || message.frameUrl || ""),
+      claimedAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString()
+    };
+    controllers[key] = controller;
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.strategyControllers]: controllers
+    });
+
+    return {
+      ok: true,
+      owner: true,
+      controllerToken: controller.token,
+      ownerFrameId: frameId
+    };
+  });
+}
+
+async function verifyStrategyController(sender, message) {
+  const tabId = sender.tab?.id;
+  if (tabId === null || tabId === undefined) {
+    return { ok: true, owner: false, reason: "missing-tab" };
+  }
+
+  return withStrategyControllerLock(tabId, async () => {
+    const result = await verifyStrategyControllerUnlocked(sender, message, true);
+    return { ok: true, ...result };
+  });
+}
+
+async function releaseStrategyController(sender, message) {
+  const tabId = sender.tab?.id;
+  if (tabId === null || tabId === undefined) {
+    return { ok: true, released: false };
+  }
+
+  return withStrategyControllerLock(tabId, async () => {
+    const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyControllers);
+    const controllers = cleanStrategyControllers(
+      stored[STORAGE_KEYS.strategyControllers]
+    );
+    const key = String(tabId);
+    const current = controllers[key];
+    const token = String(message.controllerToken || "");
+    const frameId = sender.frameId ?? 0;
+
+    if (!current || current.frameId !== frameId || current.token !== token) {
+      return { ok: true, released: false };
+    }
+
+    delete controllers[key];
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.strategyControllers]: controllers
+    });
+    return { ok: true, released: true };
+  });
+}
+
+async function verifyStrategyControllerUnlocked(sender, message, refresh) {
+  const tabId = sender.tab?.id;
+  const topUrl = sender.tab?.url || message.pageUrl || "";
+  const frameId = sender.frameId ?? 0;
+  const token = String(message.controllerToken || "");
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyControllers);
+  const controllers = cleanStrategyControllers(
+    stored[STORAGE_KEYS.strategyControllers]
+  );
+  const key = String(tabId);
+  const current = controllers[key] || null;
+  const expectedTopUrl = sanitizeStatusUrl(topUrl);
+
+  if (
+    !current ||
+    current.frameId !== frameId ||
+    current.token !== token ||
+    (current.topUrl && expectedTopUrl && current.topUrl !== expectedTopUrl)
+  ) {
+    return {
+      owner: false,
+      ownerFrameId: current?.frameId ?? null,
+      reason: "controller-mismatch"
+    };
+  }
+
+  if (refresh) {
+    current.lastSeenAt = new Date().toISOString();
+    current.frameUrl = sanitizeStatusUrl(sender.url || message.frameUrl || "");
+    controllers[key] = current;
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.strategyControllers]: controllers
+    });
+  }
+
+  return {
+    owner: true,
+    controllerToken: current.token,
+    ownerFrameId: current.frameId
+  };
+}
+
+function cleanStrategyControllers(value) {
+  const current = value && typeof value === "object" ? value : {};
+  const now = Date.now();
+  const cleaned = {};
+
+  for (const [key, controller] of Object.entries(current)) {
+    const lastSeenAt = Date.parse(
+      controller?.lastSeenAt || controller?.claimedAt || ""
+    );
+    if (
+      Number.isFinite(lastSeenAt) &&
+      now - lastSeenAt < STRATEGY_CONTROLLER_TTL_MS * 3 &&
+      controller?.token
+    ) {
+      cleaned[key] = controller;
+    }
+  }
+
+  return cleaned;
+}
+
+function isStrategyStateActive(state) {
+  return Boolean(
+    state &&
+      (state.awaitingResult ||
+        ["arming", "betting"].includes(state.stage))
+  );
+}
+
+function createControllerToken() {
+  return `${Date.now()}-${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+}
+
+function withStrategyControllerLock(tabId, task) {
+  const key = String(tabId);
+  const previous = strategyControllerLocks.get(key) || Promise.resolve();
+  const current = previous.catch(() => undefined).then(task);
+  strategyControllerLocks.set(key, current);
+  return current.finally(() => {
+    if (strategyControllerLocks.get(key) === current) {
+      strategyControllerLocks.delete(key);
+    }
+  });
+}
+
+async function sendStrategyNotification(sender, message) {
+  const settings = await getSettings();
+  const topUrl = sender.tab?.url || message.pageUrl || "";
+
+  if (!isAviatorTabUrl(topUrl)) {
+    return { ok: false, error: "Уведомление разрешено только из вкладки Aviator" };
+  }
+
+  if (!settings.strategyTenPlusX348Enabled) {
+    return { ok: false, error: "Стратегия выключена" };
+  }
+
+  const ownership = await verifyStrategyController(sender, message);
+  if (!ownership.owner) {
+    return { ok: false, error: "Уведомление отклонено: iframe не управляет стратегией" };
+  }
+
+  if (!settings.telegramChatId) {
+    return { ok: false, error: "Telegram ID не указан" };
+  }
+
+  const notification = sanitizeStrategyNotification(message.notification, settings);
+  if (
+    notification.reason === "series" &&
+    !settings.strategyTenPlusX348NotifySeriesEnabled
+  ) {
+    return { ok: false, error: "Уведомления о серии выключены" };
+  }
+
+  const notificationKey = String(
+    message.notificationKey || `${notification.reason}:${Date.now()}`
+  ).slice(0, 300);
+  const storedStatus = await chrome.storage.local.get(STORAGE_KEYS.telegramStatus);
+  const previousStatus = storedStatus[STORAGE_KEYS.telegramStatus] || null;
+  const previousAge = Date.now() - Date.parse(previousStatus?.observedAt || "");
+  if (
+    previousStatus?.notificationKey === notificationKey &&
+    (previousStatus.ok === true ||
+      (previousStatus.pending === true && Number.isFinite(previousAge) && previousAge < 30_000))
+  ) {
+    return { ok: true, duplicate: true };
+  }
+
+  const statusBase = {
+    reason: notification.reason,
+    notificationKey,
+    observedAt: new Date().toISOString()
+  };
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.telegramStatus]: {
+      ...statusBase,
+      pending: true,
+      ok: null,
+      error: null
+    }
+  });
+
+  try {
+    const response = await sendTelegramStrategyNotification(notification);
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.telegramStatus]: {
+        ...statusBase,
+        pending: false,
+        ok: true,
+        error: null
+      }
+    });
+    return { ok: true, response };
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.telegramStatus]: {
+        ...statusBase,
+        pending: false,
+        ok: false,
+        error: messageText.slice(0, 500)
+      }
+    });
+    return { ok: false, error: messageText };
+  }
+}
+
+function sanitizeStrategyNotification(value, settings) {
+  const source = value && typeof value === "object" ? value : {};
+  const reason = ["series", "profit", "stop"].includes(source.reason)
+    ? source.reason
+    : null;
+  if (!reason) {
+    throw new Error("Неизвестная причина Telegram-уведомления");
+  }
+
+  const number = (candidate, fallback = 0) => {
+    const parsed = Number(candidate);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const payload = {
+    chat_id: settings.telegramChatId,
+    reason,
+    strategy_name: "10+ - x3.48",
+    target: 3.48,
+    signal_length: 10
+  };
+
+  if (reason === "series") {
+    payload.series_length = Math.min(
+      10,
+      Math.max(1, Math.round(number(source.seriesLength, 1)))
+    );
+    payload.current_streak = Math.max(
+      payload.series_length,
+      Math.round(number(source.currentStreak, payload.series_length))
+    );
+  } else if (reason === "profit") {
+    payload.step = Math.max(1, Math.round(number(source.step, 1)));
+    payload.drawdown = Math.max(0, number(source.drawdown));
+    payload.profit = Math.max(0, number(source.profit));
+    payload.multiplier = Math.max(0, number(source.multiplier));
+    payload.bet = Math.max(0, number(source.bet));
+  } else {
+    payload.step = Math.max(1, Math.round(number(source.step, 1)));
+    payload.drawdown = Math.max(0, number(source.drawdown));
+    payload.loss = Math.max(0, number(source.loss));
+  }
+
+  return payload;
+}
+
+async function getStrategyState(sender, message) {
   return {
     ok: true,
     state: await getStrategyStateForTab(
@@ -373,19 +869,31 @@ async function saveStrategyState(sender, message) {
     return { ok: true, ignored: true, reason: "strategy-disabled" };
   }
 
-  const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyStates);
-  const states = cleanStrategyStates(stored[STORAGE_KEYS.strategyStates]);
-  const state = sanitizeStrategyState(message.state, {
-    tabId,
-    frameId: sender.frameId ?? 0,
-    topUrl,
-    frameUrl: sender.url || message.frameUrl || ""
+  return withStrategyControllerLock(tabId, async () => {
+    const ownership = await verifyStrategyControllerUnlocked(sender, message, true);
+    if (!ownership.owner) {
+      return {
+        ok: false,
+        ignored: true,
+        reason: "not-strategy-controller",
+        error: "Состояние отклонено: iframe не управляет стратегией"
+      };
+    }
+
+    const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyStates);
+    const states = cleanStrategyStates(stored[STORAGE_KEYS.strategyStates]);
+    const state = sanitizeStrategyState(message.state, {
+      tabId,
+      frameId: sender.frameId ?? 0,
+      topUrl,
+      frameUrl: sender.url || message.frameUrl || ""
+    });
+
+    states[String(tabId)] = state;
+    await chrome.storage.local.set({ [STORAGE_KEYS.strategyStates]: states });
+
+    return { ok: true, state };
   });
-
-  states[String(tabId)] = state;
-  await chrome.storage.local.set({ [STORAGE_KEYS.strategyStates]: states });
-
-  return { ok: true, state };
 }
 
 function cleanStrategyStates(value) {
@@ -440,6 +948,21 @@ function sanitizeStrategyState(value, context) {
     stoppedCycles: Math.max(0, Math.round(number(state.stoppedCycles))),
     error: state.error ? String(state.error).slice(0, 500) : null,
     message: state.message ? String(state.message).slice(0, 500) : null,
+    signalInterfacePrepared: Boolean(state.signalInterfacePrepared),
+    signalPreparationError: state.signalPreparationError
+      ? String(state.signalPreparationError).slice(0, 500)
+      : null,
+    lastSeriesNotificationRoundId: state.lastSeriesNotificationRoundId
+      ? String(state.lastSeriesNotificationRoundId).slice(0, 160)
+      : null,
+    lastNotificationReason: ["series", "profit", "stop"].includes(
+      state.lastNotificationReason
+    )
+      ? state.lastNotificationReason
+      : null,
+    lastNotificationAt: state.lastNotificationAt
+      ? String(state.lastNotificationAt).slice(0, 64)
+      : null,
     configSignature: state.configSignature
       ? String(state.configSignature).slice(0, 100)
       : null,

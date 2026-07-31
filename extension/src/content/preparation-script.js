@@ -187,7 +187,9 @@
       event.source !== window ||
       !event.data ||
       event.data.channel !== CHANNEL ||
-      event.data.source !== BRIDGE_SOURCE
+      event.data.source !== BRIDGE_SOURCE ||
+      (event.data.controllerSource &&
+        event.data.controllerSource !== CONTROLLER_SOURCE)
     ) {
       return;
     }
@@ -251,6 +253,8 @@
         event.data &&
         event.data.channel === CHANNEL &&
         event.data.source === BRIDGE_SOURCE &&
+        (!event.data.controllerSource ||
+          event.data.controllerSource === CONTROLLER_SOURCE) &&
         event.data.type === type &&
         event.data.requestId === requestId
     );

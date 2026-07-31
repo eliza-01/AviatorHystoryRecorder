@@ -10,6 +10,9 @@ from app.api.v1.routes.results.get_results import router as get_results_router
 from app.api.v1.routes.results.post_results_batch import (
     router as post_results_batch_router,
 )
+from app.api.v1.routes.telegram.post_strategy_notification import (
+    router as post_strategy_notification_router,
+)
 
 api_router = APIRouter()
 api_router.include_router(get_health_router)
@@ -18,3 +21,4 @@ api_router.include_router(get_results_router)
 api_router.include_router(get_analysis_router)
 api_router.include_router(post_samples_batch_router)
 api_router.include_router(get_samples_router)
+api_router.include_router(post_strategy_notification_router)

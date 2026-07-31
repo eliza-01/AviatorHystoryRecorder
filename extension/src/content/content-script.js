@@ -1,7 +1,9 @@
 (() => {
   "use strict";
 
-  const DOM_STATE_KEY = "aviatorDomHistoryStateV5";
+  const LEGACY_DOM_STATE_KEY = "aviatorDomHistoryStateV5";
+  const DOM_STATE_KEY = "aviatorDomHistoryStatesV6";
+  const DOM_STATE_SCOPE = buildDomStateScope();
   const PARSER_NAME = "aviator-payouts-polling-v5";
   const SCAN_INTERVAL_MS = 400;
   const REQUIRED_STABLE_SCANS = 2;
@@ -531,7 +533,7 @@
         `10+ - x3.48 · шаг ${state.step || 1} · ставка ${formatBadgeNumber(
           state.activeBet || state.nextBet || 0.2
         )} · ждём результат`;
-    } else if (["arming", "betting"].includes(stage)) {
+    } else if (["preparing", "arming", "betting", "waiting-reset"].includes(stage)) {
       strategyBadgeText.textContent =
         `10+ - x3.48 · ${state.message || "подготовка ставки"}`;
     } else {
@@ -733,6 +735,12 @@
       const insideWrapper = Boolean(block.parentElement?.classList.contains("payouts-wrapper"));
       const insideDropdown = Boolean(block.closest("app-stats-dropdown"));
 
+      // Раскрывающийся список содержит визуальную копию истории. Он не должен
+      // участвовать ни в сохранении DOM-состояния, ни в управлении стратегией.
+      if (insideDropdown) {
+        continue;
+      }
+
       // Основной горизонтальный список находится внутри .stats/.payouts-wrapper.
       // Раскрывающийся app-stats-dropdown содержит его копию и получает штраф.
       const score =
@@ -741,10 +749,10 @@
         (insideWrapper ? 100 : 0) -
         (insideDropdown ? 80 : 0);
 
-      const selectorKind = insideWrapper
-        ? "stats-payouts-wrapper"
-        : insideDropdown
-          ? "stats-dropdown-copy"
+      const selectorKind = insideDropdown
+        ? "stats-dropdown-copy"
+        : insideWrapper
+          ? "stats-payouts-wrapper"
           : "generic-payouts-block";
 
       if (!best || score > best.score) {
@@ -772,7 +780,7 @@
 
     if (!isValidState(persistedState)) {
       const ids = await createIds(values);
-      notifyStrategySnapshot(values, ids, "initial");
+      notifyStrategySnapshot(values, ids, "initial", selectorKind);
       const accepted = await emitResults(
         values,
         ids,
@@ -807,7 +815,7 @@
     const previousIds = persistedState.ids;
 
     if (arraysEqual(values, previousValues)) {
-      notifyStrategySnapshot(values, previousIds, "unchanged");
+      notifyStrategySnapshot(values, previousIds, "unchanged", selectorKind);
       reportStatus({
         stage: "unchanged",
         historyFound: true,
@@ -822,7 +830,7 @@
       // После долгого простоя весь экран истории может смениться. Считаем его
       // новой базовой точкой, но не отправляем 30 потенциальных дублей.
       const ids = await createIds(values);
-      notifyStrategySnapshot(values, ids, "resync");
+      notifyStrategySnapshot(values, ids, "resync", selectorKind);
       await storeState(values, ids);
       reportStatus({
         stage: "resynced-without-send",
@@ -835,7 +843,12 @@
 
     const insertedCount = alignment.currentOffset;
     const ids = await mergeIds(values, previousIds, alignment);
-    notifyStrategySnapshot(values, ids, insertedCount > 0 ? "prepend" : "aligned");
+    notifyStrategySnapshot(
+      values,
+      ids,
+      insertedCount > 0 ? "prepend" : "aligned",
+      selectorKind
+    );
 
     if (insertedCount === 0) {
       await storeState(values, ids);
@@ -881,8 +894,13 @@
     }, true);
   }
 
-  function notifyStrategySnapshot(values, ids, reason) {
-    if (!Array.isArray(values) || !Array.isArray(ids) || values.length !== ids.length) {
+  function notifyStrategySnapshot(values, ids, reason, selectorKind) {
+    if (
+      !Array.isArray(values) ||
+      !Array.isArray(ids) ||
+      values.length !== ids.length ||
+      selectorKind === "stats-dropdown-copy"
+    ) {
       return;
     }
 
@@ -895,6 +913,8 @@
           values: values.slice(),
           ids: ids.slice(),
           reason,
+          selectorKind: selectorKind || "unknown",
+          historySize: values.length,
           observedAt: new Date().toISOString()
         }
       },
@@ -1048,8 +1068,16 @@
       return;
     }
 
-    const stored = await chrome.storage.local.get(DOM_STATE_KEY);
-    persistedState = stored[DOM_STATE_KEY] || null;
+    const stored = await chrome.storage.local.get([
+      DOM_STATE_KEY,
+      LEGACY_DOM_STATE_KEY
+    ]);
+    const scopedStates =
+      stored[DOM_STATE_KEY] && typeof stored[DOM_STATE_KEY] === "object"
+        ? stored[DOM_STATE_KEY]
+        : {};
+    persistedState =
+      scopedStates[DOM_STATE_SCOPE] || stored[LEGACY_DOM_STATE_KEY] || null;
     persistedStateLoaded = true;
   }
 
@@ -1061,7 +1089,24 @@
       updatedAt: new Date().toISOString()
     };
     persistedStateLoaded = true;
-    await chrome.storage.local.set({ [DOM_STATE_KEY]: persistedState });
+
+    const stored = await chrome.storage.local.get(DOM_STATE_KEY);
+    const current =
+      stored[DOM_STATE_KEY] && typeof stored[DOM_STATE_KEY] === "object"
+        ? stored[DOM_STATE_KEY]
+        : {};
+    const entries = Object.entries(current)
+      .filter(([, value]) => isValidState(value))
+      .sort(
+        (left, right) =>
+          Date.parse(right[1]?.updatedAt || "") -
+          Date.parse(left[1]?.updatedAt || "")
+      )
+      .slice(0, 19);
+    const next = Object.fromEntries(entries);
+    next[DOM_STATE_SCOPE] = persistedState;
+
+    await chrome.storage.local.set({ [DOM_STATE_KEY]: next });
   }
 
   function isValidState(state) {
@@ -1195,6 +1240,11 @@
     } catch {
       // Контекст расширения мог быть перезагружен — вкладка будет перезапущена.
     }
+  }
+
+  function buildDomStateScope() {
+    const value = `${location.origin}${location.pathname}|${document.referrer || ""}`;
+    return fallbackHash(value).slice(0, 24);
   }
 
   function safeFrameUrl() {

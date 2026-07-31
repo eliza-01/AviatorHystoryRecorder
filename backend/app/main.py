@@ -27,7 +27,7 @@ web_directory = Path(__file__).resolve().parent / "web"
 
 app = FastAPI(
     title=settings.app_name,
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan,
 )
 

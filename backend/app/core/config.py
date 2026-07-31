@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     log_level: str = "INFO"
 
+    telegram_bot_token: str = ""
+    telegram_request_timeout_seconds: float = 10.0
+
     mysql_host: str = "mysql"
     mysql_port: int = 3306
     mysql_database: str = "aviator_history"

@@ -2,6 +2,8 @@ const elements = {
   version: document.querySelector("#version"),
   enabled: document.querySelector("#enabled"),
   apiBaseUrl: document.querySelector("#apiBaseUrl"),
+  telegramChatId: document.querySelector("#telegramChatId"),
+  telegramStatus: document.querySelector("#telegramStatus"),
   strategyTenPlusX348Enabled: document.querySelector(
     "#strategyTenPlusX348Enabled"
   ),
@@ -9,6 +11,12 @@ const elements = {
     "#strategyTenPlusX348StopStep"
   ),
   strategyStopDetails: document.querySelector("#strategyStopDetails"),
+  strategyTenPlusX348NotifySeriesEnabled: document.querySelector(
+    "#strategyTenPlusX348NotifySeriesEnabled"
+  ),
+  strategyTenPlusX348NotifySeriesLength: document.querySelector(
+    "#strategyTenPlusX348NotifySeriesLength"
+  ),
   strategyDescription: document.querySelector("#strategyDescription"),
   strategyDescriptionDialog: document.querySelector(
     "#strategyDescriptionDialog"
@@ -81,8 +89,11 @@ populateStopOptions();
 const settingsElements = [
   elements.enabled,
   elements.apiBaseUrl,
+  elements.telegramChatId,
   elements.strategyTenPlusX348Enabled,
   elements.strategyTenPlusX348StopStep,
+  elements.strategyTenPlusX348NotifySeriesEnabled,
+  elements.strategyTenPlusX348NotifySeriesLength,
   elements.preparationEnabled,
   elements.preparationBet,
   elements.preparationCashout,
@@ -102,6 +113,10 @@ elements.strategyTenPlusX348Enabled.addEventListener(
 elements.strategyTenPlusX348StopStep.addEventListener(
   "change",
   renderSelectedStopDetails
+);
+elements.strategyTenPlusX348NotifySeriesEnabled.addEventListener(
+  "change",
+  syncStrategyNotificationFields
 );
 elements.preparationEnabled.addEventListener("change", syncPreparationFields);
 elements.pageAutoReloadEnabled.addEventListener("change", syncReloadFields);
@@ -153,18 +168,26 @@ function render(response) {
     queues,
     collector,
     preparation,
-    strategy
+    strategy,
+    telegram
   } = response;
 
   elements.version.textContent = `v${version || "?"}`;
   if (!settingsDirty && !isEditingSettings()) {
     elements.enabled.checked = Boolean(settings.enabled);
     elements.apiBaseUrl.value = settings.apiBaseUrl || "";
+    elements.telegramChatId.value = settings.telegramChatId || "";
     elements.strategyTenPlusX348Enabled.checked = Boolean(
       settings.strategyTenPlusX348Enabled
     );
     elements.strategyTenPlusX348StopStep.value = String(
       settings.strategyTenPlusX348StopStep || 0
+    );
+    elements.strategyTenPlusX348NotifySeriesEnabled.checked = Boolean(
+      settings.strategyTenPlusX348NotifySeriesEnabled
+    );
+    elements.strategyTenPlusX348NotifySeriesLength.value = String(
+      settings.strategyTenPlusX348NotifySeriesLength || 8
     );
     elements.preparationEnabled.checked = Boolean(settings.preparationEnabled);
     elements.preparationBet.value = String(settings.preparationBet ?? 1);
@@ -180,6 +203,7 @@ function render(response) {
     syncReloadFields();
   }
 
+  renderTelegramStatus(telegram, settings);
   renderStrategyStatus(strategy, settings);
   renderPreparationStatus(preparation, settings);
 
@@ -201,6 +225,46 @@ function render(response) {
     STAGE_LABELS[collector?.stage] || collector?.stage || "—";
   elements.collectorObservedAt.textContent = formatTime(collector?.observedAt);
   elements.collectorFrameUrl.textContent = collector?.frameUrl || "";
+}
+
+
+function renderTelegramStatus(telegram, settings) {
+  elements.telegramStatus.classList.remove("ok", "error");
+
+  if (!settings?.telegramChatId) {
+    elements.telegramStatus.textContent =
+      "Укажите ID чата и сначала запустите диалог с ботом в Telegram.";
+    return;
+  }
+
+  if (telegram?.pending === true) {
+    elements.telegramStatus.textContent = "Telegram-уведомление отправляется…";
+    return;
+  }
+
+  if (telegram?.ok === false) {
+    elements.telegramStatus.textContent =
+      `Последняя отправка не удалась: ${telegram.error || "неизвестная ошибка"}`;
+    elements.telegramStatus.classList.add("error");
+    return;
+  }
+
+  if (telegram?.ok === true) {
+    const labels = {
+      series: "уведомление о серии",
+      profit: "уведомление о прибыли",
+      stop: "уведомление о стопе"
+    };
+    elements.telegramStatus.textContent =
+      `Отправлено: ${labels[telegram.reason] || "Telegram-уведомление"} · ` +
+      formatTime(telegram.observedAt);
+    elements.telegramStatus.classList.add("ok");
+    return;
+  }
+
+  elements.telegramStatus.textContent =
+    "Telegram ID сохранён. Уведомления о прибыли и стопе включены.";
+  elements.telegramStatus.classList.add("ok");
 }
 
 function renderStrategyStatus(strategy, settings) {
@@ -248,7 +312,7 @@ function renderStrategyStatus(strategy, settings) {
     return;
   }
 
-  if (["arming", "betting"].includes(stage)) {
+  if (["preparing", "arming", "betting", "waiting-reset"].includes(stage)) {
     elements.strategyStatus.textContent = `${
       strategy.message || "Подготовка ставки"
     }${stopSuffix}`;
@@ -308,6 +372,12 @@ async function save() {
   const strategyStopStep = normalizeStopStep(
     elements.strategyTenPlusX348StopStep.value
   );
+  const telegramChatId = normalizeTelegramChatId(
+    elements.telegramChatId.value
+  );
+  const seriesLength = normalizeSeriesLength(
+    elements.strategyTenPlusX348NotifySeriesLength.value
+  );
 
   if (reloadSeconds === null) {
     setStatus("Интервал обновления должен быть от 5 до 86400 секунд", true);
@@ -327,6 +397,18 @@ async function save() {
     return false;
   }
 
+  if (telegramChatId === null) {
+    setStatus("Telegram ID должен быть целым числом", true);
+    elements.telegramChatId.focus();
+    return false;
+  }
+
+  if (seriesLength === null) {
+    setStatus("Длина серии должна быть от 1 до 10", true);
+    elements.strategyTenPlusX348NotifySeriesLength.focus();
+    return false;
+  }
+
   if (strategyStopStep === null) {
     setStatus("Стоп должен быть выбран из списка шагов", true);
     elements.strategyTenPlusX348StopStep.focus();
@@ -334,6 +416,14 @@ async function save() {
   }
 
   const strategyEnabled = elements.strategyTenPlusX348Enabled.checked;
+  const notifySeriesEnabled =
+    elements.strategyTenPlusX348NotifySeriesEnabled.checked;
+
+  if (notifySeriesEnabled && !telegramChatId) {
+    setStatus("Для уведомления о серии укажите Telegram ID", true);
+    elements.telegramChatId.focus();
+    return false;
+  }
   elements.pageAutoReloadSeconds.value = String(reloadSeconds);
   elements.preparationBet.value = formatNumber(preparationBet);
   elements.preparationCashout.value = formatNumber(preparationCashout);
@@ -343,8 +433,11 @@ async function save() {
     settings: {
       enabled: elements.enabled.checked,
       apiBaseUrl: elements.apiBaseUrl.value,
+      telegramChatId,
       strategyTenPlusX348Enabled: strategyEnabled,
       strategyTenPlusX348StopStep: strategyStopStep,
+      strategyTenPlusX348NotifySeriesEnabled: notifySeriesEnabled,
+      strategyTenPlusX348NotifySeriesLength: seriesLength,
       preparationEnabled: strategyEnabled
         ? false
         : elements.preparationEnabled.checked,
@@ -538,7 +631,17 @@ function syncStrategyFields() {
   }
 
   renderSelectedStopDetails();
+  syncStrategyNotificationFields();
   syncPreparationFields();
+}
+
+
+function syncStrategyNotificationFields() {
+  const strategyEnabled = elements.strategyTenPlusX348Enabled.checked;
+  elements.strategyTenPlusX348NotifySeriesEnabled.disabled = !strategyEnabled;
+  elements.strategyTenPlusX348NotifySeriesLength.disabled =
+    !strategyEnabled ||
+    !elements.strategyTenPlusX348NotifySeriesEnabled.checked;
 }
 
 function syncPreparationFields() {
@@ -552,6 +655,27 @@ function syncPreparationFields() {
 function syncReloadFields() {
   elements.pageAutoReloadSeconds.disabled =
     !elements.pageAutoReloadEnabled.checked;
+}
+
+
+function normalizeTelegramChatId(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  const numeric = normalized.startsWith("-")
+    ? normalized.slice(1)
+    : normalized;
+  return /^\d{1,20}$/.test(numeric) ? normalized : null;
+}
+
+function normalizeSeriesLength(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 10) {
+    return null;
+  }
+  return Math.round(parsed);
 }
 
 function normalizeReloadSeconds(value) {

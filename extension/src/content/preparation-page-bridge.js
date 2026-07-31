@@ -15,7 +15,9 @@
     return;
   }
 
-  let activeRun = 0;
+  let runSequence = 0;
+  const activeRuns = new Map();
+  let activeControllerSource = null;
 
   window.addEventListener("message", onControllerMessage, false);
 
@@ -34,12 +36,17 @@
     }
 
     if (message.type === "PING") {
-      postMessageToController("BRIDGE_READY", message.requestId);
+      postMessageToController(
+        "BRIDGE_READY",
+        message.requestId,
+        {},
+        message.source
+      );
       return;
     }
 
     if (message.type === "CANCEL") {
-      activeRun += 1;
+      cancelControllerRun(message.source, message.requestId);
       return;
     }
 
@@ -47,8 +54,22 @@
       return;
     }
 
-    const run = ++activeRun;
     const requestId = String(message.requestId || "");
+    const run = beginControllerRun(message.source, requestId);
+    if (!run) {
+      postMessageToController(
+        "PREPARE_RESULT",
+        requestId,
+        {
+          ok: false,
+          stage: "error",
+          error: "Интерфейс уже управляется активной стратегией"
+        },
+        message.source
+      );
+      return;
+    }
+
     const settings = {
       bet: normalizePositiveNumber(message.settings?.bet, 1),
       cashout: normalizePositiveNumber(message.settings?.cashout, 2)
@@ -90,7 +111,8 @@
         stage: "completed",
         bet: settings.bet,
         cashout: settings.cashout
-      });
+      }, run.source);
+      completeControllerRun(run);
     } catch (error) {
       if (error?.name === "PreparationCancelledError") {
         return;
@@ -100,7 +122,8 @@
         ok: false,
         stage: "error",
         error: error instanceof Error ? error.message : String(error)
-      });
+      }, run.source);
+      completeControllerRun(run);
     }
   }
 
@@ -856,8 +879,64 @@
     });
   }
 
+  function beginControllerRun(source, requestId) {
+    if (
+      source === CONTROLLER_SOURCE &&
+      activeControllerSource === STRATEGY_CONTROLLER_SOURCE &&
+      activeRuns.has(STRATEGY_CONTROLLER_SOURCE)
+    ) {
+      return null;
+    }
+
+    if (source === STRATEGY_CONTROLLER_SOURCE) {
+      cancelControllerRun(CONTROLLER_SOURCE);
+    }
+
+    cancelControllerRun(source);
+    const run = {
+      source,
+      requestId,
+      sequence: ++runSequence
+    };
+    activeRuns.set(source, run);
+    activeControllerSource = source;
+    return run;
+  }
+
+  function cancelControllerRun(source, requestId = null) {
+    const current = activeRuns.get(source);
+    if (!current) {
+      return;
+    }
+    if (requestId && current.requestId !== String(requestId)) {
+      return;
+    }
+
+    activeRuns.delete(source);
+    if (activeControllerSource === source) {
+      activeControllerSource = activeRuns.has(STRATEGY_CONTROLLER_SOURCE)
+        ? STRATEGY_CONTROLLER_SOURCE
+        : activeRuns.has(CONTROLLER_SOURCE)
+          ? CONTROLLER_SOURCE
+          : null;
+    }
+  }
+
+  function completeControllerRun(run) {
+    if (activeRuns.get(run.source) === run) {
+      activeRuns.delete(run.source);
+    }
+    if (activeControllerSource === run.source) {
+      activeControllerSource = activeRuns.has(STRATEGY_CONTROLLER_SOURCE)
+        ? STRATEGY_CONTROLLER_SOURCE
+        : activeRuns.has(CONTROLLER_SOURCE)
+          ? CONTROLLER_SOURCE
+          : null;
+    }
+  }
+
   function ensureActiveRun(run) {
-    if (run !== activeRun) {
+    if (activeRuns.get(run.source) !== run) {
       const error = new Error("Подготовка отменена новой конфигурацией");
       error.name = "PreparationCancelledError";
       throw error;
@@ -869,14 +948,20 @@
       stage,
       bet: settings.bet,
       cashout: settings.cashout
-    });
+    }, activeControllerSource);
   }
 
-  function postMessageToController(type, requestId, payload = {}) {
+  function postMessageToController(
+    type,
+    requestId,
+    payload = {},
+    controllerSource = null
+  ) {
     window.postMessage(
       {
         channel: CHANNEL,
         source: BRIDGE_SOURCE,
+        controllerSource,
         type,
         requestId,
         ...payload

@@ -15,7 +15,10 @@
 
     <label class="switch-row">
       <span>Сбор включён</span>
-      <input id="enabled" type="checkbox">
+      <span class="toggle-control">
+        <input id="enabled" type="checkbox">
+        <span class="toggle-track" aria-hidden="true"></span>
+      </span>
     </label>
 
     <label class="field">
@@ -23,12 +26,33 @@
       <input id="apiBaseUrl" type="url" autocomplete="off" spellcheck="false">
     </label>
 
+    <section class="telegram-card" aria-labelledby="telegram-title">
+      <h2 id="telegram-title">Telegram</h2>
+      <label class="field">
+        <span>Telegram ID</span>
+        <input
+          id="telegramChatId"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="123456789"
+        >
+      </label>
+      <small id="telegramStatus">
+        Укажите ID чата и сначала запустите диалог с ботом в Telegram.
+      </small>
+    </section>
+
     <section class="strategies-section" aria-labelledby="strategies-title">
       <h2 id="strategies-title">Стратегии</h2>
       <article class="strategy-card">
         <label class="switch-row strategy-switch">
           <span>10+ - x3.48</span>
-          <input id="strategyTenPlusX348Enabled" type="checkbox">
+          <span class="toggle-control">
+            <input id="strategyTenPlusX348Enabled" type="checkbox">
+            <span class="toggle-track" aria-hidden="true"></span>
+          </span>
         </label>
 
         <div class="strategy-summary">
@@ -42,6 +66,30 @@
           <small id="strategyStopDetails" class="strategy-stop-details"></small>
         </label>
 
+        <div class="strategy-notification-settings">
+          <label class="switch-row notification-switch">
+            <span>Уведомить о серии</span>
+            <span class="toggle-control">
+              <input id="strategyTenPlusX348NotifySeriesEnabled" type="checkbox" disabled>
+              <span class="toggle-track" aria-hidden="true"></span>
+            </span>
+          </label>
+          <label class="field strategy-series-field">
+            <span>Последовательность результатов ≤ 3.48</span>
+            <input
+              id="strategyTenPlusX348NotifySeriesLength"
+              type="number"
+              min="1"
+              max="10"
+              step="1"
+              value="8"
+              inputmode="numeric"
+              disabled
+            >
+          </label>
+          <small>Прибыль и достижение стопа отправляются автоматически.</small>
+        </div>
+
         <button id="strategyDescription" type="button" class="secondary strategy-description">
           Описание
         </button>
@@ -52,7 +100,10 @@
     <section class="preparation-card" aria-labelledby="preparation-title">
       <label class="switch-row preparation-switch">
         <span id="preparation-title">Подготовка</span>
-        <input id="preparationEnabled" type="checkbox">
+        <span class="toggle-control">
+          <input id="preparationEnabled" type="checkbox">
+          <span class="toggle-track" aria-hidden="true"></span>
+        </span>
       </label>
       <div class="preparation-fields">
         <label class="field">
@@ -102,13 +153,13 @@
         >
         <span>сек</span>
       </label>
-      <label class="reload-toggle" title="Включить автообновление">
+      <label class="toggle-control" title="Включить автообновление">
         <input
           id="pageAutoReloadEnabled"
           type="checkbox"
           aria-label="Автообновление"
         >
-        <span aria-hidden="true"></span>
+        <span class="toggle-track" aria-hidden="true"></span>
       </label>
     </section>
 
@@ -154,6 +205,7 @@
       <li>После проигрыша следующая ставка округляется вверх до шага 0.01 так, чтобы вернуть весь минус и получить не менее 0.20.</li>
       <li>При выбранном стопе цикл завершается после проигрыша на указанном шаге.</li>
       <li>После прибыли не менее 0.20 или достижения стопа ставки прекращаются, счётчик начинается заново, автообновление возобновляется.</li>
+      <li>Telegram сообщает о выбранной длине серии, прибыли и стопе. В итоговых уведомлениях указываются шаг завершения и просадка.</li>
     </ol>
   </dialog>
 

@@ -7,8 +7,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   preparationEnabled: false,
   preparationBet: 1,
   preparationCashout: 2,
+  telegramChatId: "",
   strategyTenPlusX348Enabled: false,
-  strategyTenPlusX348StopStep: 0
+  strategyTenPlusX348StopStep: 0,
+  strategyTenPlusX348NotifySeriesEnabled: false,
+  strategyTenPlusX348NotifySeriesLength: 8
 });
 
 export const STORAGE_KEYS = Object.freeze({
@@ -18,7 +21,9 @@ export const STORAGE_KEYS = Object.freeze({
   stats: "stats",
   collectorFrames: "collectorFrames",
   preparationFrames: "preparationFrames",
-  strategyStates: "strategyStates"
+  strategyStates: "strategyStates",
+  strategyControllers: "strategyControllers",
+  telegramStatus: "telegramStatus"
 });
 
 export const MAX_RESULT_QUEUE_SIZE = 5000;
