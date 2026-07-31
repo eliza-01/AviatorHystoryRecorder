@@ -29,28 +29,27 @@ def _format_message(payload: TelegramStrategyNotificationRequest) -> str:
         title = (
             "🏁 <b>Сигнал стратегии сформирован</b>"
             if signal_reached
-            else "📉 <b>Порог серии достигнут</b>"
+            else f"🏁 <b>Готовность <b>{notification_level}/{signal_length}</b></b>"
         )
         signal_status = "достигнут" if signal_reached else "ещё не достигнут"
         return (
             f"{title}\n\n"
-            f"Стратегия: <b>{strategy}</b>\n"
-            f"Текущая последовательность: <b>{current_streak}</b> результатов ≤ "
-            f"<b>{target}x</b>\n"
-            f"Прогресс стратегии: <b>{min(current_streak, signal_length)}/{signal_length}</b>\n"
-            f"Уровень уведомления: <b>{notification_level}/{signal_length}</b>\n"
-            f"Сигнал: <b>{signal_status}</b>"
+            # f"Цель: <b>{target}x</b>\n"
+            f"Текущий прогресс: <b>{min(current_streak, signal_length)}/{signal_length}</b>\n\n"
+            # f"Уровень уведомления: <b>{notification_level}/{signal_length}</b>\n"
+            # f"Сигнал: <b>{signal_status}</b>"
+            f"Стратегия: <b>{strategy}</b>"
         )
 
     if payload.reason is TelegramNotificationReason.PROFIT:
         return (
-            "✅ <b>Цикл закрыт в прибыль</b>\n\n"
-            f"Стратегия: <b>{strategy}</b>\n"
-            f"🏁 Завершено на шаге: <b>{int(payload.step or 0)}</b>\n"
+            "✅ <b>Закрыто с прибылью</b>\n\n"
             f"Прибыль: <b>+{_format_number(payload.profit or 0)}</b>\n"
-            f"📉 Максимальная просадка: <b>{_format_number(payload.drawdown or 0)}</b>\n"
-            f"Победная ставка: <b>{_format_number(payload.bet or 0)}</b>\n"
-            f"Результат раунда: <b>{_format_number(payload.multiplier or 0)}x</b>"
+            f"На шаге: <b>{int(payload.step or 0)}</b>\n"
+            f"Просадка: <b>{_format_number(payload.drawdown or 0)}</b>\n"
+            f"Последняя ставка: <b>{_format_number(payload.bet or 0)}</b>\n"
+            f"Множитель раунда: <b>{_format_number(payload.multiplier or 0)}x</b>\n\n"
+            f"Стратегия: <b>{strategy}</b>"
         )
 
     return (
