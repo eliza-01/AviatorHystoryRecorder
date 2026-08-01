@@ -8,6 +8,10 @@ const MIN_PREPARATION_CASHOUT = 1.01;
 const MAX_PREPARATION_CASHOUT = 1_000_000;
 const MAX_STRATEGY_STOP_STEP = 100;
 const MAX_STRATEGY_SERIES_LENGTH = 10;
+const MIN_BADGE_OFFSET_PX = 0;
+const MAX_BADGE_OFFSET_PX = 10_000;
+const MIN_BADGE_OPACITY_PERCENT = 10;
+const MAX_BADGE_OPACITY_PERCENT = 100;
 
 export async function getSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.settings);
@@ -97,6 +101,31 @@ export function normalizeStrategySeriesLength(value) {
   );
 }
 
+
+export function normalizeBadgeOffsetPx(value, fallback = 10) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(
+    MAX_BADGE_OFFSET_PX,
+    Math.max(MIN_BADGE_OFFSET_PX, Math.round(parsed))
+  );
+}
+
+export function normalizeBadgeOpacityPercent(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SETTINGS.badgeOpacityPercent;
+  }
+
+  return Math.min(
+    MAX_BADGE_OPACITY_PERCENT,
+    Math.max(MIN_BADGE_OPACITY_PERCENT, Math.round(parsed))
+  );
+}
+
 export function normalizeStrategyStopStep(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -118,6 +147,17 @@ function sanitizeSettings(value) {
   settings.pageAutoReloadEnabled = Boolean(settings.pageAutoReloadEnabled);
   settings.pageAutoReloadSeconds = normalizeAutoReloadSeconds(
     settings.pageAutoReloadSeconds
+  );
+  settings.badgeOffsetTopPx = normalizeBadgeOffsetPx(
+    settings.badgeOffsetTopPx,
+    DEFAULT_SETTINGS.badgeOffsetTopPx
+  );
+  settings.badgeOffsetLeftPx = normalizeBadgeOffsetPx(
+    settings.badgeOffsetLeftPx,
+    DEFAULT_SETTINGS.badgeOffsetLeftPx
+  );
+  settings.badgeOpacityPercent = normalizeBadgeOpacityPercent(
+    settings.badgeOpacityPercent
   );
   settings.telegramChatId = normalizeTelegramChatId(settings.telegramChatId);
   settings.strategyTenPlusX340Enabled = Boolean(

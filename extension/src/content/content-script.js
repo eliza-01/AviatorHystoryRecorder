@@ -13,6 +13,15 @@
   const STATUS_INTERVAL_MS = 3000;
   const MIN_AUTO_RELOAD_SECONDS = 5;
   const MAX_AUTO_RELOAD_SECONDS = 86_400;
+  const MIN_BADGE_OFFSET_PX = 0;
+  const MAX_BADGE_OFFSET_PX = 10_000;
+  const MIN_BADGE_OPACITY_PERCENT = 10;
+  const MAX_BADGE_OPACITY_PERCENT = 100;
+  const BADGE_VERTICAL_GAP_PX = 6;
+  const BADGE_FALLBACK_HEIGHT_PX = 38;
+  const STRATEGY_TARGET = 3.40;
+  const STRATEGY_INITIAL_BET = 0.20;
+  const STRATEGY_BET_STEP = 0.01;
   const STRATEGY_HISTORY_CHANNEL = "aviator-strategy-history-v1";
   const STRATEGY_HISTORY_SOURCE = "aviator-history-scanner";
 
@@ -31,6 +40,9 @@
   let pageAutoReloadDurationMs = 0;
   let pageAutoReloadEnabled = false;
   let pageAutoReloadSeconds = 60;
+  let badgeOffsetTopPx = 10;
+  let badgeOffsetLeftPx = 10;
+  let badgeOpacityPercent = 100;
   let pageAutoReloadBadgeHost = null;
   let pageAutoReloadBadgeButton = null;
   let pageAutoReloadBadgeText = null;
@@ -41,10 +53,14 @@
   let pageAutoReloadBadgeKeyboardHandler = null;
   let pageAutoReloadSuspendedByStrategy = false;
   let strategyEnabled = false;
+  let strategyStopStep = 12;
+  let strategyReinvestmentEnabled = false;
   let strategyRuntimeState = null;
   let strategyBadgeHost = null;
   let strategyBadgeText = null;
   let strategyBadgeProgress = null;
+  let balanceBadgeHost = null;
+  let balanceBadgeText = null;
   let topPageReady = document.readyState === "complete";
 
   start();
@@ -69,6 +85,8 @@
     if (window.top !== window) {
       return;
     }
+
+    window.addEventListener("resize", applyBadgeLayout, { passive: true });
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local" || !topPageReady) {
@@ -100,6 +118,63 @@
     );
   }
 
+  function applyCaptureSettings(response) {
+    badgeOffsetTopPx = clampInteger(
+      response?.badgeOffsetTopPx,
+      MIN_BADGE_OFFSET_PX,
+      MAX_BADGE_OFFSET_PX,
+      10
+    );
+    badgeOffsetLeftPx = clampInteger(
+      response?.badgeOffsetLeftPx,
+      MIN_BADGE_OFFSET_PX,
+      MAX_BADGE_OFFSET_PX,
+      10
+    );
+    badgeOpacityPercent = clampInteger(
+      response?.badgeOpacityPercent,
+      MIN_BADGE_OPACITY_PERCENT,
+      MAX_BADGE_OPACITY_PERCENT,
+      100
+    );
+    strategyStopStep = Math.max(0, Number(response?.strategyTenPlusX340StopStep || 0));
+    strategyReinvestmentEnabled = Boolean(
+      response?.strategyTenPlusX340ReinvestmentEnabled
+    );
+    applyBadgeLayout();
+  }
+
+  function applyBadgeLayout() {
+    const maxWidth = Math.max(120, window.innerWidth - badgeOffsetLeftPx - 10);
+    const opacity = (badgeOpacityPercent / 100).toFixed(2);
+    const hosts = [
+      pageAutoReloadBadgeHost,
+      strategyBadgeHost,
+      balanceBadgeHost
+    ].filter((host) => Boolean(host?.isConnected));
+    let currentTop = badgeOffsetTopPx;
+
+    for (const host of hosts) {
+      host.style.top = `${currentTop}px`;
+      host.style.left = `${badgeOffsetLeftPx}px`;
+      host.style.transform = "none";
+      host.style.opacity = opacity;
+      host.style.maxWidth = `${maxWidth}px`;
+      host.style.setProperty("--aviator-badge-max-width", `${maxWidth}px`);
+      currentTop += getBadgeHostHeight(host) + BADGE_VERTICAL_GAP_PX;
+    }
+  }
+
+  function getBadgeHostHeight(host) {
+    const rect = typeof host?.getBoundingClientRect === "function"
+      ? host.getBoundingClientRect()
+      : null;
+    const measuredHeight = Number(rect?.height || host?.offsetHeight || 0);
+    return Number.isFinite(measuredHeight) && measuredHeight > 0
+      ? Math.ceil(measuredHeight)
+      : BADGE_FALLBACK_HEIGHT_PX;
+  }
+
   async function refreshStrategyRuntimeStatus() {
     try {
       const response = await chrome.runtime.sendMessage({
@@ -109,10 +184,12 @@
 
       if (!response?.ok || !response.aviatorTab) {
         removeStrategyBadge();
+        removeBalanceBadge();
         return;
       }
 
       const previousSuspended = pageAutoReloadSuspendedByStrategy;
+      applyCaptureSettings(response);
       strategyEnabled = Boolean(response.strategyTenPlusX340Enabled);
       strategyRuntimeState = response.strategyState || null;
       pageAutoReloadSuspendedByStrategy = Boolean(
@@ -144,9 +221,11 @@
       if (!response?.ok || !response.aviatorTab) {
         removePageAutoReloadBadge();
         removeStrategyBadge();
+        removeBalanceBadge();
         return;
       }
 
+      applyCaptureSettings(response);
       pageAutoReloadSeconds = clampInteger(
         response.pageAutoReloadSeconds,
         MIN_AUTO_RELOAD_SECONDS,
@@ -197,8 +276,8 @@
     host.style.cssText = [
       "position:fixed",
       "top:10px",
-      "left:50%",
-      "transform:translateX(-50%)",
+      "left:10px",
+      "transform:none",
       "z-index:2147483647",
       "display:block",
       "max-width:calc(100vw - 20px)",
@@ -212,7 +291,7 @@
         position: relative;
         box-sizing: border-box;
         min-width: 250px;
-        max-width: calc(100vw - 20px);
+        max-width: var(--aviator-badge-max-width, calc(100vw - 20px));
         overflow: hidden;
         padding: 9px 14px 11px;
         border: 1px solid rgba(255, 255, 255, 0.22);
@@ -346,6 +425,7 @@
     pageAutoReloadBadgeProgress = progress;
 
     (document.documentElement || document).append(host);
+    applyBadgeLayout();
     updatePageAutoReloadBadge();
   }
 
@@ -458,6 +538,7 @@
     pageAutoReloadBadgeProgress.style.transform =
       `scaleX(${Math.max(0, Math.min(1, ratio)).toFixed(4)})`;
     pageAutoReloadBadgeButton.title = "Нажмите, чтобы выключить";
+    applyBadgeLayout();
   }
 
   async function togglePageAutoReloadFromBadge() {
@@ -511,10 +592,13 @@
   function updateStrategyBadge() {
     if (!strategyEnabled) {
       removeStrategyBadge();
+      removeBalanceBadge();
       return;
     }
 
     ensureStrategyBadge();
+    ensureBalanceBadge();
+    updateBalanceBadge();
     if (!strategyBadgeText || !strategyBadgeProgress) {
       return;
     }
@@ -542,6 +626,7 @@
     }
 
     strategyBadgeProgress.style.transform = `scaleX(${progress.toFixed(4)})`;
+    applyBadgeLayout();
   }
 
   function ensureStrategyBadge() {
@@ -553,9 +638,9 @@
     host.id = "aviator-extension-strategy-badge";
     host.style.cssText = [
       "position:fixed",
-      "top:54px",
-      "left:50%",
-      "transform:translateX(-50%)",
+      "top:56px",
+      "left:10px",
+      "transform:none",
       "z-index:2147483646",
       "display:block",
       "max-width:calc(100vw - 20px)",
@@ -569,7 +654,7 @@
         position: relative;
         box-sizing: border-box;
         min-width: 250px;
-        max-width: calc(100vw - 20px);
+        max-width: var(--aviator-badge-max-width, calc(100vw - 20px));
         overflow: hidden;
         padding: 8px 14px 11px;
         border: 1px solid rgba(119, 179, 255, 0.72);
@@ -610,7 +695,7 @@
         transition: transform 180ms linear;
       }
       @media (max-width: 360px) {
-        .badge { min-width: 0; width: calc(100vw - 20px); }
+        .badge { min-width: 0; width: var(--aviator-badge-max-width, calc(100vw - 20px)); }
       }
     `;
 
@@ -632,6 +717,137 @@
     strategyBadgeText = text;
     strategyBadgeProgress = progress;
     (document.documentElement || document).append(host);
+    applyBadgeLayout();
+  }
+
+  function updateBalanceBadge() {
+    if (!strategyEnabled) {
+      removeBalanceBadge();
+      return;
+    }
+
+    ensureBalanceBadge();
+    if (!balanceBadgeText) {
+      return;
+    }
+
+    const state = strategyRuntimeState || {};
+    const calculatedMinimum = calculateMinimumStartingDeposit(strategyStopStep);
+    const stateMinimum = Number(state.minimumDeposit);
+    const minimumDeposit = Number.isFinite(stateMinimum) && stateMinimum > 0
+      ? stateMinimum
+      : calculatedMinimum;
+    const stateBalance = Number(state.strategyBalance);
+    const currentBalance = Number.isFinite(stateBalance) && stateBalance >= 0
+      ? stateBalance
+      : minimumDeposit;
+    const reinvestmentMarker = strategyReinvestmentEnabled ? "✅" : "❌";
+
+    balanceBadgeText.textContent =
+      `🏁 ${formatOptionalBadgeNumber(minimumDeposit)} ` +
+      `💰 ${formatOptionalBadgeNumber(currentBalance)} ` +
+      `${reinvestmentMarker} Реинвест`;
+    applyBadgeLayout();
+  }
+
+  function ensureBalanceBadge() {
+    if (balanceBadgeHost?.isConnected) {
+      return;
+    }
+
+    const host = document.createElement("div");
+    host.id = "aviator-extension-balance-badge";
+    host.style.cssText = [
+      "position:fixed",
+      "top:98px",
+      "left:10px",
+      "transform:none",
+      "z-index:2147483645",
+      "display:block",
+      "max-width:calc(100vw - 20px)",
+      "pointer-events:none"
+    ].join(";");
+
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = `
+      .badge {
+        box-sizing: border-box;
+        width: max-content;
+        min-width: 250px;
+        max-width: var(--aviator-badge-max-width, calc(100vw - 20px));
+        overflow: hidden;
+        padding: 8px 14px;
+        border: 1px solid rgba(255, 204, 92, 0.78);
+        border-radius: 999px;
+        background: rgba(20, 23, 28, 0.94);
+        box-shadow: 0 5px 18px rgba(0, 0, 0, 0.32);
+        color: #ffffff;
+        font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: center;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      .text {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      @media (max-width: 360px) {
+        .badge { min-width: 0; width: var(--aviator-badge-max-width, calc(100vw - 20px)); }
+      }
+    `;
+
+    const badge = document.createElement("div");
+    badge.className = "badge";
+    badge.setAttribute("aria-live", "polite");
+    const text = document.createElement("span");
+    text.className = "text";
+    badge.append(text);
+    shadow.append(style, badge);
+
+    balanceBadgeHost = host;
+    balanceBadgeText = text;
+    (document.documentElement || document).append(host);
+    applyBadgeLayout();
+  }
+
+  function removeBalanceBadge() {
+    balanceBadgeHost?.remove();
+    balanceBadgeHost = null;
+    balanceBadgeText = null;
+  }
+
+  function calculateMinimumStartingDeposit(stopStep) {
+    const normalizedStop = Math.max(0, Math.round(Number(stopStep) || 0));
+    if (normalizedStop <= 0) {
+      return 0;
+    }
+
+    let cumulativeLoss = 0;
+    let bet = STRATEGY_INITIAL_BET;
+    for (let step = 1; step <= normalizedStop; step += 1) {
+      cumulativeLoss = roundBadgeMoney(cumulativeLoss + bet);
+      if (step < normalizedStop) {
+        const raw =
+          (cumulativeLoss + STRATEGY_INITIAL_BET) / (STRATEGY_TARGET - 1);
+        bet = Math.max(
+          STRATEGY_INITIAL_BET,
+          ceilBadgeToStep(raw, STRATEGY_BET_STEP)
+        );
+      }
+    }
+    return Math.ceil(cumulativeLoss - 1e-9);
+  }
+
+  function ceilBadgeToStep(value, step) {
+    return Number((Math.ceil((value - 1e-10) / step) * step).toFixed(2));
+  }
+
+  function roundBadgeMoney(value) {
+    return Number(Number(value).toFixed(2));
   }
 
   function removeStrategyBadge() {
@@ -645,6 +861,11 @@
 
   function formatBadgeNumber(value) {
     return Number(value || 0).toFixed(2);
+  }
+
+  function formatOptionalBadgeNumber(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(2) : "—";
   }
 
   function clampInteger(value, minimum, maximum, fallback) {

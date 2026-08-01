@@ -37,6 +37,9 @@ const elements = {
   preparationStatus: document.querySelector("#preparationStatus"),
   pageAutoReloadEnabled: document.querySelector("#pageAutoReloadEnabled"),
   pageAutoReloadSeconds: document.querySelector("#pageAutoReloadSeconds"),
+  badgeOffsetTopPx: document.querySelector("#badgeOffsetTopPx"),
+  badgeOffsetLeftPx: document.querySelector("#badgeOffsetLeftPx"),
+  badgeOpacityPercent: document.querySelector("#badgeOpacityPercent"),
   save: document.querySelector("#save"),
   test: document.querySelector("#test"),
   flush: document.querySelector("#flush"),
@@ -76,6 +79,7 @@ const STRATEGY_TARGET = 3.40;
 const STRATEGY_INITIAL_BET = 0.2;
 const STRATEGY_REINVESTMENT_BET_INCREMENT = 0.01;
 const STRATEGY_BET_STEP = 0.01;
+const BADGE_SETTINGS_AUTOSAVE_DELAY_MS = 80;
 
 const PREPARATION_STAGE_LABELS = {
   "not-started": "Ожидание загрузки игры",
@@ -92,6 +96,8 @@ const PREPARATION_STAGE_LABELS = {
 let refreshTimer = null;
 let settingsDirty = false;
 let currentStrategyState = null;
+let badgeSettingsAutosaveTimer = null;
+let badgeSettingsAutosaveSequence = 0;
 
 populateStopOptions();
 
@@ -114,6 +120,17 @@ const settingsElements = [
 for (const element of settingsElements) {
   element.addEventListener("input", markSettingsDirty);
   element.addEventListener("change", markSettingsDirty);
+}
+
+const badgeSettingsElements = [
+  elements.badgeOffsetTopPx,
+  elements.badgeOffsetLeftPx,
+  elements.badgeOpacityPercent
+];
+
+for (const element of badgeSettingsElements) {
+  element.addEventListener("input", scheduleBadgeSettingsAutosave);
+  element.addEventListener("change", scheduleBadgeSettingsAutosave);
 }
 
 elements.strategyTenPlusX340Enabled.addEventListener(
@@ -151,7 +168,10 @@ elements.resetDom.addEventListener("click", resetDomState);
 
 void load();
 refreshTimer = setInterval(() => void load(false), 1500);
-window.addEventListener("unload", () => clearInterval(refreshTimer));
+window.addEventListener("unload", () => {
+  clearInterval(refreshTimer);
+  clearTimeout(badgeSettingsAutosaveTimer);
+});
 
 async function load(showLoading = true) {
   if (showLoading) {
@@ -216,6 +236,15 @@ function render(response) {
     );
     elements.pageAutoReloadSeconds.value = String(
       settings.pageAutoReloadSeconds || 60
+    );
+    elements.badgeOffsetTopPx.value = String(
+      settings.badgeOffsetTopPx ?? 10
+    );
+    elements.badgeOffsetLeftPx.value = String(
+      settings.badgeOffsetLeftPx ?? 10
+    );
+    elements.badgeOpacityPercent.value = String(
+      settings.badgeOpacityPercent ?? 100
     );
     syncStrategyFields();
     syncPreparationFields();
@@ -383,7 +412,76 @@ function renderPreparationStatus(preparation, settings) {
   );
 }
 
+function scheduleBadgeSettingsAutosave() {
+  clearTimeout(badgeSettingsAutosaveTimer);
+  badgeSettingsAutosaveTimer = setTimeout(() => {
+    void saveBadgeSettingsImmediately();
+  }, BADGE_SETTINGS_AUTOSAVE_DELAY_MS);
+}
+
+async function saveBadgeSettingsImmediately() {
+  const badgeOffsetTopPx = normalizeBadgeOffset(
+    elements.badgeOffsetTopPx.value
+  );
+  const badgeOffsetLeftPx = normalizeBadgeOffset(
+    elements.badgeOffsetLeftPx.value
+  );
+  const badgeOpacityPercent = normalizeBadgeOpacity(
+    elements.badgeOpacityPercent.value
+  );
+
+  if (
+    badgeOffsetTopPx === null ||
+    badgeOffsetLeftPx === null ||
+    badgeOpacityPercent === null
+  ) {
+    setStatus(
+      "Проверьте отступы 0–10000 px и прозрачность 10–100%",
+      true
+    );
+    return;
+  }
+
+  const sequence = ++badgeSettingsAutosaveSequence;
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "SAVE_SETTINGS",
+      settings: {
+        badgeOffsetTopPx,
+        badgeOffsetLeftPx,
+        badgeOpacityPercent
+      }
+    });
+
+    if (sequence !== badgeSettingsAutosaveSequence) {
+      return;
+    }
+
+    if (!response?.ok) {
+      setStatus(response?.error || "Не удалось сохранить положение баджей", true);
+      return;
+    }
+
+    elements.badgeOffsetTopPx.value = String(
+      response.settings?.badgeOffsetTopPx ?? badgeOffsetTopPx
+    );
+    elements.badgeOffsetLeftPx.value = String(
+      response.settings?.badgeOffsetLeftPx ?? badgeOffsetLeftPx
+    );
+    elements.badgeOpacityPercent.value = String(
+      response.settings?.badgeOpacityPercent ?? badgeOpacityPercent
+    );
+    setStatus("Баджи обновлены и сохранены", false, true);
+  } catch {
+    if (sequence === badgeSettingsAutosaveSequence) {
+      setStatus("Не удалось сохранить положение баджей", true);
+    }
+  }
+}
+
 async function save() {
+  clearTimeout(badgeSettingsAutosaveTimer);
   setStatus("Сохранение…");
   const reloadSeconds = normalizeReloadSeconds(
     elements.pageAutoReloadSeconds.value
@@ -407,6 +505,33 @@ async function save() {
   const seriesLength = normalizeSeriesLength(
     elements.strategyTenPlusX340NotifySeriesLength.value
   );
+  const badgeOffsetTopPx = normalizeBadgeOffset(
+    elements.badgeOffsetTopPx.value
+  );
+  const badgeOffsetLeftPx = normalizeBadgeOffset(
+    elements.badgeOffsetLeftPx.value
+  );
+  const badgeOpacityPercent = normalizeBadgeOpacity(
+    elements.badgeOpacityPercent.value
+  );
+
+  if (badgeOffsetTopPx === null) {
+    setStatus("Отступ сверху должен быть от 0 до 10000 px", true);
+    elements.badgeOffsetTopPx.focus();
+    return false;
+  }
+
+  if (badgeOffsetLeftPx === null) {
+    setStatus("Отступ слева должен быть от 0 до 10000 px", true);
+    elements.badgeOffsetLeftPx.focus();
+    return false;
+  }
+
+  if (badgeOpacityPercent === null) {
+    setStatus("Прозрачность должна быть от 10 до 100%", true);
+    elements.badgeOpacityPercent.focus();
+    return false;
+  }
 
   if (reloadSeconds === null) {
     setStatus("Интервал обновления должен быть от 5 до 86400 секунд", true);
@@ -467,6 +592,9 @@ async function save() {
   elements.pageAutoReloadSeconds.value = String(reloadSeconds);
   elements.preparationBet.value = formatNumber(preparationBet);
   elements.preparationCashout.value = formatNumber(preparationCashout);
+  elements.badgeOffsetTopPx.value = String(badgeOffsetTopPx);
+  elements.badgeOffsetLeftPx.value = String(badgeOffsetLeftPx);
+  elements.badgeOpacityPercent.value = String(badgeOpacityPercent);
 
   const response = await chrome.runtime.sendMessage({
     type: "SAVE_SETTINGS",
@@ -485,7 +613,10 @@ async function save() {
       preparationBet,
       preparationCashout,
       pageAutoReloadEnabled: elements.pageAutoReloadEnabled.checked,
-      pageAutoReloadSeconds: reloadSeconds
+      pageAutoReloadSeconds: reloadSeconds,
+      badgeOffsetTopPx,
+      badgeOffsetLeftPx,
+      badgeOpacityPercent
     }
   });
 
@@ -819,6 +950,23 @@ function syncReloadFields() {
 }
 
 
+
+function normalizeBadgeOffset(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 10000) {
+    return null;
+  }
+  return Math.round(parsed);
+}
+
+function normalizeBadgeOpacity(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 10 || parsed > 100) {
+    return null;
+  }
+  return Math.round(parsed);
+}
+
 function normalizeTelegramChatId(value) {
   const normalized = String(value || "").trim();
   if (!normalized) {
@@ -872,5 +1020,8 @@ function markSettingsDirty() {
 }
 
 function isEditingSettings() {
-  return settingsElements.includes(document.activeElement);
+  return (
+    settingsElements.includes(document.activeElement) ||
+    badgeSettingsElements.includes(document.activeElement)
+  );
 }

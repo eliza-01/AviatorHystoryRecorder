@@ -181,6 +181,9 @@ async function getCaptureState(sender, message) {
       settings.pageAutoReloadEnabled && aviatorTab
     ),
     pageAutoReloadSeconds: Number(settings.pageAutoReloadSeconds),
+    badgeOffsetTopPx: Number(settings.badgeOffsetTopPx),
+    badgeOffsetLeftPx: Number(settings.badgeOffsetLeftPx),
+    badgeOpacityPercent: Number(settings.badgeOpacityPercent),
     preparationEnabled: Boolean(
       settings.preparationEnabled && aviatorTab
     ),

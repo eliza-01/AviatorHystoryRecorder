@@ -198,6 +198,50 @@
       <div><span>Дубликаты</span><strong id="duplicateResults">0</strong></div>
     </section>
 
+
+    <section class="badge-settings-card" aria-labelledby="badge-settings-title">
+      <h2 id="badge-settings-title">Баджи на странице</h2>
+      <div class="badge-settings-grid">
+        <label class="field">
+          <span>Отступ сверху, px</span>
+          <input
+            id="badgeOffsetTopPx"
+            type="number"
+            min="0"
+            max="10000"
+            step="1"
+            value="10"
+            inputmode="numeric"
+          >
+        </label>
+        <label class="field">
+          <span>Отступ слева, px</span>
+          <input
+            id="badgeOffsetLeftPx"
+            type="number"
+            min="0"
+            max="10000"
+            step="1"
+            value="10"
+            inputmode="numeric"
+          >
+        </label>
+        <label class="field">
+          <span>Прозрачность, %</span>
+          <input
+            id="badgeOpacityPercent"
+            type="number"
+            min="10"
+            max="100"
+            step="1"
+            value="100"
+            inputmode="numeric"
+          >
+        </label>
+      </div>
+      <small>Положение и прозрачность применяются сразу и автоматически сохраняются. Все баджи выстраиваются одной вертикальной колонкой. 100% — полностью непрозрачные.</small>
+    </section>
+
     <p id="status" class="status">Загрузка…</p>
   </main>
 
