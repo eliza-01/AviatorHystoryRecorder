@@ -7,13 +7,16 @@
   const INTERFACE_CHANNEL = "aviator-preparation-v2";
   const CONTROLLER_SOURCE = "aviator-strategy-controller";
   const BRIDGE_SOURCE = "aviator-preparation-page-bridge";
-  const STRATEGY_ID = "ten-plus-x348";
-  const STRATEGY_NAME = "10+ - x3.48";
-  const TARGET = 3.48;
+  const STRATEGY_ID = "ten-plus-x340";
+  const STRATEGY_NAME = "10+ - x3.40";
+  const TARGET = 3.40;
   const SIGNAL_LENGTH = 10;
   const AUTO_RELOAD_PAUSE_AT = 8;
+  const STATE_VERSION = 3;
+  const REINVESTMENT_FORMULA_VERSION = "deposit-v2";
   const INITIAL_BET = 0.2;
   const MIN_PROFIT = 0.2;
+  const REINVESTMENT_BET_INCREMENT = 0.01;
   const BET_STEP = 0.01;
   const BRIDGE_TIMEOUT_MS = 8_000;
   const ACTION_TIMEOUT_MS = 80_000;
@@ -71,14 +74,17 @@
       }
 
       const nextSettings = {
-        enabled: Boolean(response.strategyTenPlusX348Enabled),
-        stopStep: normalizeStopStep(response.strategyTenPlusX348StopStep),
+        enabled: Boolean(response.strategyTenPlusX340Enabled),
+        stopStep: normalizeStopStep(response.strategyTenPlusX340StopStep),
+        reinvestmentEnabled: Boolean(
+          response.strategyTenPlusX340ReinvestmentEnabled
+        ),
         telegramConfigured: Boolean(response.telegramConfigured),
         notifySeriesEnabled: Boolean(
-          response.strategyTenPlusX348NotifySeriesEnabled
+          response.strategyTenPlusX340NotifySeriesEnabled
         ),
         notifySeriesLength: normalizeSeriesLength(
-          response.strategyTenPlusX348NotifySeriesLength
+          response.strategyTenPlusX340NotifySeriesLength
         )
       };
       const signature = buildConfigSignature(nextSettings);
@@ -402,7 +408,7 @@
       state.autoReloadPaused = true;
       state.message =
         `Серия ${streak}/10 уже шла при запуске. ` +
-        "Ставки пропущены для безопасности; ждём результат выше 3.48";
+        "Ставки пропущены для безопасности; ждём результат выше 3.40";
       await persistState();
       return;
     }
@@ -433,7 +439,7 @@
         state.consecutiveLosses += 1;
         state.autoReloadPaused = true;
         state.message =
-          `Пропускаем уже начавшуюся серию: ${state.consecutiveLosses} результатов ≤ 3.48. ` +
+          `Пропускаем уже начавшуюся серию: ${state.consecutiveLosses} результатов ≤ 3.40. ` +
           "Ждём её сброса";
       }
       await persistState();
@@ -544,11 +550,14 @@
   }
 
   function beginBettingCycle() {
+    const cycleInitialBet = calculateNextCycleInitialBet();
     state.stage = "betting";
     state.consecutiveLosses = SIGNAL_LENGTH;
     state.step = 0;
     state.cumulativeLoss = 0;
-    state.nextBet = INITIAL_BET;
+    state.cycleInitialBet = cycleInitialBet;
+    state.cycleTargetProfit = cycleInitialBet;
+    state.nextBet = cycleInitialBet;
     state.activeBet = null;
     state.awaitingResult = false;
     state.autoReloadPaused = true;
@@ -556,8 +565,8 @@
     state.signalInterfacePrepared = Boolean(signalInterfacePrepared);
     state.signalPreparationError = null;
     state.message = signalInterfacePrepared
-      ? "Сигнал 10/10. Интерфейс готов, размещаем первую ставку"
-      : "Сигнал 10/10. Подготовка первой ставки";
+      ? `Сигнал 10/10. Интерфейс готов, размещаем ${formatMoney(cycleInitialBet)}`
+      : `Сигнал 10/10. Подготовка ставки ${formatMoney(cycleInitialBet)}`;
   }
 
   async function ensureSignalInterfacePrepared() {
@@ -581,19 +590,20 @@
       state.autoReloadPaused = true;
       state.signalInterfacePrepared = false;
       state.signalPreparationError = null;
+      const preparedBet = calculateNextCycleInitialBet();
       state.message =
         `Серия ${state.consecutiveLosses}/10. ` +
-        "Автообновление остановлено, готовим интерфейс к ставке 0.20";
+        `Автообновление остановлено, готовим интерфейс к ставке ${formatMoney(preparedBet)}`;
       await persistState();
 
       try {
-        await prepareInterfaceOnly(INITIAL_BET);
+        await prepareInterfaceOnly(preparedBet);
         signalInterfacePrepared = true;
         state.signalInterfacePrepared = true;
         state.signalPreparationError = null;
         state.stage = "waiting";
         state.message =
-          `Интерфейс готов: ставка 0.20, авто кешаут 3.48. ` +
+          `Интерфейс готов: ставка ${formatMoney(preparedBet)}, авто кешаут 3.40. ` +
           `Ожидание сигнала: ${state.consecutiveLosses}/10`;
         await persistState();
       } catch (error) {
@@ -620,7 +630,9 @@
       return;
     }
 
-    const bet = roundToCent(Math.max(INITIAL_BET, state.nextBet));
+    const bet = roundToCent(
+      Math.max(state.cycleInitialBet || INITIAL_BET, state.nextBet)
+    );
     state.stage = "arming";
     state.autoReloadPaused = true;
     state.message = `Проверка интерфейса перед ставкой ${formatMoney(bet)}`;
@@ -665,18 +677,32 @@
 
     state.completedCycles += 1;
     state.lastCyclePnl = pnl;
+    state.strategyBalance = roundToFour(
+      Math.max(
+        0,
+        Number(
+          state.strategyBalance ?? calculateMinimumStartingDeposit()
+        ) + pnl
+      )
+    );
     state.stage = "waiting";
     state.consecutiveLosses = 0;
     state.step = 0;
     state.cumulativeLoss = 0;
-    state.nextBet = INITIAL_BET;
+    state.cycleInitialBet = calculateNextCycleInitialBet();
+    state.cycleTargetProfit = state.cycleInitialBet;
+    state.nextBet = state.cycleInitialBet;
     state.activeBet = null;
     state.awaitingResult = false;
     signalInterfacePrepared = false;
     state.signalInterfacePrepared = false;
     state.signalPreparationError = null;
     state.autoReloadPaused = false;
-    state.message = `Цикл закрыт: +${pnl.toFixed(2)} при ${multiplier.toFixed(2)}x`;
+    state.message =
+      `Цикл закрыт: +${pnl.toFixed(2)} при ${multiplier.toFixed(2)}x.` +
+      (settings?.reinvestmentEnabled
+        ? ` Баланс стратегии: ${state.strategyBalance.toFixed(2)}`
+        : "");
     return notification;
   }
 
@@ -693,18 +719,32 @@
 
     state.stoppedCycles += 1;
     state.lastCyclePnl = pnl;
+    state.strategyBalance = roundToFour(
+      Math.max(
+        0,
+        Number(
+          state.strategyBalance ?? calculateMinimumStartingDeposit()
+        ) + pnl
+      )
+    );
     state.stage = "waiting";
     state.consecutiveLosses = 0;
     state.step = 0;
     state.cumulativeLoss = 0;
-    state.nextBet = INITIAL_BET;
+    state.cycleInitialBet = calculateNextCycleInitialBet();
+    state.cycleTargetProfit = state.cycleInitialBet;
+    state.nextBet = state.cycleInitialBet;
     state.activeBet = null;
     state.awaitingResult = false;
     signalInterfacePrepared = false;
     state.signalInterfacePrepared = false;
     state.signalPreparationError = null;
     state.autoReloadPaused = false;
-    state.message = `Достигнут стоп. Результат цикла: ${pnl.toFixed(2)}`;
+    state.message =
+      `Достигнут стоп. Результат цикла: ${pnl.toFixed(2)}.` +
+      (settings?.reinvestmentEnabled
+        ? ` Баланс стратегии: ${state.strategyBalance.toFixed(2)}`
+        : "");
     return notification;
   }
 
@@ -719,9 +759,81 @@
     await persistState();
   }
 
+  function calculateNextCycleInitialBet() {
+    if (!settings?.reinvestmentEnabled) {
+      return INITIAL_BET;
+    }
+
+    const minimumDeposit = calculateMinimumStartingDeposit();
+    const reinvestmentStep = calculateReinvestmentBalanceStep();
+    if (minimumDeposit <= 0 || reinvestmentStep <= 0) {
+      return INITIAL_BET;
+    }
+
+    const balance = Math.max(
+      0,
+      Number(state?.strategyBalance ?? minimumDeposit)
+    );
+    const profit = Math.max(0, balance - minimumDeposit);
+    const levels = Math.floor((profit + 1e-9) / reinvestmentStep);
+    return roundToCent(
+      INITIAL_BET + levels * REINVESTMENT_BET_INCREMENT
+    );
+  }
+
+  function calculateMinimumStartingDeposit(stopStep = settings?.stopStep) {
+    const details = calculateStopStepDetails(stopStep, INITIAL_BET);
+    return details
+      ? Math.ceil(details.cumulativeLoss - 1e-9)
+      : 0;
+  }
+
+  function calculateReinvestmentBalanceStep(stopStep = settings?.stopStep) {
+    const minimumDeposit = calculateMinimumStartingDeposit(stopStep);
+    return minimumDeposit > 0
+      ? roundToFour(minimumDeposit / 20)
+      : 0;
+  }
+
+  function calculateStopStepDetails(
+    stopStep,
+    initialBet = INITIAL_BET
+  ) {
+    const normalizedStep = normalizeStopStep(stopStep);
+    if (normalizedStep <= 0) {
+      return null;
+    }
+
+    let cumulativeLoss = 0;
+    let bet = initialBet;
+    for (let step = 1; step <= normalizedStep; step += 1) {
+      cumulativeLoss = roundToCent(cumulativeLoss + bet);
+      if (step === normalizedStep) {
+        return {
+          step,
+          bet,
+          cumulativeLoss
+        };
+      }
+
+      const raw = (cumulativeLoss + initialBet) / (TARGET - 1);
+      bet = Math.max(initialBet, ceilToStep(raw, BET_STEP));
+    }
+
+    return null;
+  }
+
   function calculateRecoveryBet(cumulativeLoss) {
-    const raw = (cumulativeLoss + MIN_PROFIT) / (TARGET - 1);
-    return Math.max(INITIAL_BET, ceilToStep(raw, BET_STEP));
+    const cycleInitialBet = Math.max(
+      INITIAL_BET,
+      Number(state?.cycleInitialBet || INITIAL_BET)
+    );
+    const cycleTargetProfit = Math.max(
+      cycleInitialBet,
+      Number(state?.cycleTargetProfit || cycleInitialBet || MIN_PROFIT)
+    );
+    const raw = (cumulativeLoss + cycleTargetProfit) / (TARGET - 1);
+    return Math.max(cycleInitialBet, ceilToStep(raw, BET_STEP));
   }
 
   function prepareInterfaceOnly(bet) {
@@ -886,14 +998,21 @@
   }
 
   function createInitialState(configSignature) {
+    const minimumDeposit = calculateMinimumStartingDeposit();
+    const reinvestmentStep = calculateReinvestmentBalanceStep();
     return {
-      version: 1,
+      version: STATE_VERSION,
       strategyId: STRATEGY_ID,
       stage: "waiting",
       initialized: false,
       consecutiveLosses: 0,
       step: 0,
       cumulativeLoss: 0,
+      minimumDeposit,
+      reinvestmentStep,
+      strategyBalance: minimumDeposit,
+      cycleInitialBet: INITIAL_BET,
+      cycleTargetProfit: MIN_PROFIT,
       nextBet: INITIAL_BET,
       activeBet: null,
       awaitingResult: false,
@@ -924,6 +1043,20 @@
       consecutiveLosses: Math.max(0, Number(source.consecutiveLosses || 0)),
       step: Math.max(0, Number(source.step || 0)),
       cumulativeLoss: Math.max(0, Number(source.cumulativeLoss || 0)),
+      minimumDeposit: initial.minimumDeposit,
+      reinvestmentStep: initial.reinvestmentStep,
+      strategyBalance: Math.max(
+        0,
+        Number(source.strategyBalance ?? initial.minimumDeposit)
+      ),
+      cycleInitialBet: Math.max(
+        INITIAL_BET,
+        Number(source.cycleInitialBet || INITIAL_BET)
+      ),
+      cycleTargetProfit: Math.max(
+        INITIAL_BET,
+        Number(source.cycleTargetProfit || source.cycleInitialBet || MIN_PROFIT)
+      ),
       nextBet: Math.max(INITIAL_BET, Number(source.nextBet || INITIAL_BET)),
       activeBet:
         source.activeBet === null || source.activeBet === undefined
@@ -955,7 +1088,7 @@
   function isCompatibleState(value, signature) {
     return Boolean(
       value &&
-        value.version === 1 &&
+        value.version === STATE_VERSION &&
         value.strategyId === STRATEGY_ID &&
         value.configSignature === signature
     );
@@ -1052,7 +1185,11 @@
   }
 
   function buildConfigSignature(value) {
-    return `${STRATEGY_ID}|${normalizeStopStep(value?.stopStep)}`;
+    return (
+      `${STRATEGY_ID}|${normalizeStopStep(value?.stopStep)}|` +
+      `${Boolean(value?.reinvestmentEnabled) ? 1 : 0}|` +
+      REINVESTMENT_FORMULA_VERSION
+    );
   }
 
   function normalizeSeriesLength(value) {
@@ -1077,6 +1214,10 @@
     return Number(Number(value).toFixed(2));
   }
 
+  function roundToFour(value) {
+    return Number(Number(value).toFixed(4));
+  }
+
   function createRequestId(prefix) {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
@@ -1090,7 +1231,7 @@
       "waiting-game": "Ожидание интерфейса Aviator",
       "switching-auto": "Проверка вкладки «Авто»",
       "enabling-cashout": "Проверка авто кешаута",
-      "setting-cashout": "Установка кэшаута 3.48",
+      "setting-cashout": "Установка кэшаута 3.40",
       "setting-bet": "Установка размера ставки",
       "placing-bet": "Нажатие кнопки «Ставка»"
     };

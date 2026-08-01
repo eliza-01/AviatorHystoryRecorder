@@ -12,8 +12,8 @@ class TelegramNotificationReason(StrEnum):
 class TelegramStrategyNotificationRequest(BaseModel):
     chat_id: str = Field(min_length=1, max_length=32)
     reason: TelegramNotificationReason
-    strategy_name: str = Field(default="10+ - x3.48", min_length=1, max_length=80)
-    target: float = Field(default=3.48, gt=1, le=1_000_000)
+    strategy_name: str = Field(default="10+ - x3.40", min_length=1, max_length=80)
+    target: float = Field(default=3.40, gt=1, le=1_000_000)
     signal_length: int = Field(default=10, ge=1, le=100)
     series_length: int | None = Field(default=None, ge=1, le=100)
     current_streak: int | None = Field(default=None, ge=1, le=100_000)

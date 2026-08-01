@@ -26,26 +26,56 @@ const COLLECTOR_FRAME_TTL_MS = 10 * 60 * 1000;
 const PREPARATION_FRAME_TTL_MS = 10 * 60 * 1000;
 const STRATEGY_STATE_TTL_MS = 24 * 60 * 60 * 1000;
 const STRATEGY_CONTROLLER_TTL_MS = 2 * 60 * 1000;
-const STRATEGY_ID = "ten-plus-x348";
+const STRATEGY_ID = "ten-plus-x340";
 const strategyControllerLocks = new Map();
 
 chrome.runtime.onInstalled.addListener(async (details) => {
-  await getSettings();
+  // Записываем мигрированные настройки x3.40 и удаляем устаревшие поля x3.48.
+  await saveSettings({});
   const keys = [
     STORAGE_KEYS.collectorFrames,
     STORAGE_KEYS.preparationFrames,
     STORAGE_KEYS.strategyControllers
   ];
 
-  // При обновлении сохраняем состояние активного цикла. Его удаление могло
-  // превратить уже идущую серию в новый ретроспективный сигнал.
+  // Состояние x3.48 несовместимо с новой целью и прогрессией x3.40.
+  // Для последующих обновлений снова сохраняем активный цикл.
+  const migratingFromX348 =
+    details.reason === "update" &&
+    isVersionBefore(details.previousVersion, "1.9.0");
+  const migratingReinvestmentFormula =
+    details.reason === "update" &&
+    isVersionBefore(details.previousVersion, "1.9.1");
+  if (
+    details.reason === "install" ||
+    migratingFromX348 ||
+    migratingReinvestmentFormula
+  ) {
+    keys.push(STORAGE_KEYS.strategyStates);
+  }
   if (details.reason === "install") {
-    keys.push(STORAGE_KEYS.strategyStates, STORAGE_KEYS.telegramStatus);
+    keys.push(STORAGE_KEYS.telegramStatus);
   }
 
   await chrome.storage.local.remove(keys);
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
 });
+
+function isVersionBefore(value, minimum) {
+  const parse = (item) =>
+    String(item || "0")
+      .split(".")
+      .slice(0, 3)
+      .map((part) => Math.max(0, Number.parseInt(part, 10) || 0));
+  const left = parse(value);
+  const right = parse(minimum);
+  for (let index = 0; index < 3; index += 1) {
+    if ((left[index] || 0) !== (right[index] || 0)) {
+      return (left[index] || 0) < (right[index] || 0);
+    }
+  }
+  return false;
+}
 
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
@@ -156,18 +186,21 @@ async function getCaptureState(sender, message) {
     ),
     preparationBet: Number(settings.preparationBet),
     preparationCashout: Number(settings.preparationCashout),
-    strategyTenPlusX348Enabled: Boolean(
-      settings.strategyTenPlusX348Enabled && aviatorTab
+    strategyTenPlusX340Enabled: Boolean(
+      settings.strategyTenPlusX340Enabled && aviatorTab
     ),
-    strategyTenPlusX348StopStep: Number(
-      settings.strategyTenPlusX348StopStep || 0
+    strategyTenPlusX340StopStep: Number(
+      settings.strategyTenPlusX340StopStep || 0
+    ),
+    strategyTenPlusX340ReinvestmentEnabled: Boolean(
+      settings.strategyTenPlusX340ReinvestmentEnabled
     ),
     telegramConfigured: Boolean(settings.telegramChatId),
-    strategyTenPlusX348NotifySeriesEnabled: Boolean(
-      settings.strategyTenPlusX348NotifySeriesEnabled
+    strategyTenPlusX340NotifySeriesEnabled: Boolean(
+      settings.strategyTenPlusX340NotifySeriesEnabled
     ),
-    strategyTenPlusX348NotifySeriesLength: Number(
-      settings.strategyTenPlusX348NotifySeriesLength || 8
+    strategyTenPlusX340NotifySeriesLength: Number(
+      settings.strategyTenPlusX340NotifySeriesLength || 8
     ),
     strategyState
   };
@@ -415,19 +448,27 @@ async function saveExtensionSettings(partialSettings) {
   const previous = await getSettings();
   const requestedEnabled = Object.prototype.hasOwnProperty.call(
     partialSettings,
-    "strategyTenPlusX348Enabled"
+    "strategyTenPlusX340Enabled"
   )
-    ? Boolean(partialSettings.strategyTenPlusX348Enabled)
-    : previous.strategyTenPlusX348Enabled;
+    ? Boolean(partialSettings.strategyTenPlusX340Enabled)
+    : previous.strategyTenPlusX340Enabled;
   const requestedStopStep = Object.prototype.hasOwnProperty.call(
     partialSettings,
-    "strategyTenPlusX348StopStep"
+    "strategyTenPlusX340StopStep"
   )
-    ? normalizeStrategyStopStep(partialSettings.strategyTenPlusX348StopStep)
-    : previous.strategyTenPlusX348StopStep;
+    ? normalizeStrategyStopStep(partialSettings.strategyTenPlusX340StopStep)
+    : previous.strategyTenPlusX340StopStep;
+  const requestedReinvestmentEnabled = Object.prototype.hasOwnProperty.call(
+    partialSettings,
+    "strategyTenPlusX340ReinvestmentEnabled"
+  )
+    ? Boolean(partialSettings.strategyTenPlusX340ReinvestmentEnabled)
+    : previous.strategyTenPlusX340ReinvestmentEnabled;
   const criticalChangeRequested =
-    requestedEnabled !== previous.strategyTenPlusX348Enabled ||
-    requestedStopStep !== previous.strategyTenPlusX348StopStep;
+    requestedEnabled !== previous.strategyTenPlusX340Enabled ||
+    requestedStopStep !== previous.strategyTenPlusX340StopStep ||
+    requestedReinvestmentEnabled !==
+      previous.strategyTenPlusX340ReinvestmentEnabled;
 
   if (criticalChangeRequested) {
     const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyStates);
@@ -445,7 +486,7 @@ async function saveExtensionSettings(partialSettings) {
       return {
         ok: false,
         error:
-          "Нельзя выключить стратегию или изменить стоп во время размещённой/размещаемой ставки. " +
+          "Нельзя выключить стратегию, изменить стоп или реинвестирование во время размещённой/размещаемой ставки. " +
           "Дождитесь результата текущего шага."
       };
     }
@@ -453,10 +494,12 @@ async function saveExtensionSettings(partialSettings) {
 
   const settings = await saveSettings(partialSettings);
   const strategyConfigurationChanged =
-    previous.strategyTenPlusX348Enabled !==
-      settings.strategyTenPlusX348Enabled ||
-    previous.strategyTenPlusX348StopStep !==
-      settings.strategyTenPlusX348StopStep;
+    previous.strategyTenPlusX340Enabled !==
+      settings.strategyTenPlusX340Enabled ||
+    previous.strategyTenPlusX340StopStep !==
+      settings.strategyTenPlusX340StopStep ||
+    previous.strategyTenPlusX340ReinvestmentEnabled !==
+      settings.strategyTenPlusX340ReinvestmentEnabled;
 
   if (strategyConfigurationChanged) {
     await chrome.storage.local.remove([
@@ -482,7 +525,7 @@ async function claimStrategyController(sender, message) {
     tabId === null ||
     tabId === undefined ||
     !isAviatorTabUrl(topUrl) ||
-    !settings.strategyTenPlusX348Enabled
+    !settings.strategyTenPlusX340Enabled
   ) {
     return { ok: true, owner: false, reason: "strategy-unavailable" };
   }
@@ -708,7 +751,7 @@ async function sendStrategyNotification(sender, message) {
     return { ok: false, error: "Уведомление разрешено только из вкладки Aviator" };
   }
 
-  if (!settings.strategyTenPlusX348Enabled) {
+  if (!settings.strategyTenPlusX340Enabled) {
     return { ok: false, error: "Стратегия выключена" };
   }
 
@@ -724,7 +767,7 @@ async function sendStrategyNotification(sender, message) {
   const notification = sanitizeStrategyNotification(message.notification, settings);
   if (
     notification.reason === "series" &&
-    !settings.strategyTenPlusX348NotifySeriesEnabled
+    !settings.strategyTenPlusX340NotifySeriesEnabled
   ) {
     return { ok: false, error: "Уведомления о серии выключены" };
   }
@@ -799,8 +842,8 @@ function sanitizeStrategyNotification(value, settings) {
   const payload = {
     chat_id: settings.telegramChatId,
     reason,
-    strategy_name: "10+ - x3.48",
-    target: 3.48,
+    strategy_name: "10+ - x3.40",
+    target: 3.40,
     signal_length: 10
   };
 
@@ -865,7 +908,7 @@ async function saveStrategyState(sender, message) {
     return { ok: true, ignored: true };
   }
 
-  if (!settings.strategyTenPlusX348Enabled) {
+  if (!settings.strategyTenPlusX340Enabled) {
     return { ok: true, ignored: true, reason: "strategy-disabled" };
   }
 
@@ -903,7 +946,12 @@ function cleanStrategyStates(value) {
 
   for (const [key, state] of Object.entries(current)) {
     const observedAt = Date.parse(state?.observedAt || "");
-    if (Number.isFinite(observedAt) && now - observedAt < STRATEGY_STATE_TTL_MS) {
+    if (
+      Number.isFinite(observedAt) &&
+      now - observedAt < STRATEGY_STATE_TTL_MS &&
+      state?.version === 3 &&
+      state?.strategyId === STRATEGY_ID
+    ) {
       cleaned[key] = state;
     }
   }
@@ -918,19 +966,49 @@ function sanitizeStrategyState(value, context) {
     return Number.isFinite(parsed) ? parsed : fallback;
   };
 
+  const minimumDeposit = Math.max(
+    0,
+    Number(number(state.minimumDeposit, 0).toFixed(4))
+  );
+  const reinvestmentStep = Math.max(
+    0,
+    Number(number(state.reinvestmentStep, 0).toFixed(4))
+  );
+  const cycleInitialBet = Math.max(
+    0.2,
+    Number(number(state.cycleInitialBet, 0.2).toFixed(2))
+  );
+
   return {
-    version: 1,
+    version: 3,
     strategyId: STRATEGY_ID,
     stage: String(state.stage || "waiting").slice(0, 64),
     initialized: Boolean(state.initialized),
     consecutiveLosses: Math.max(0, Math.round(number(state.consecutiveLosses))),
     step: Math.max(0, Math.round(number(state.step))),
     cumulativeLoss: Math.max(0, Number(number(state.cumulativeLoss).toFixed(2))),
-    nextBet: Math.max(0.2, Number(number(state.nextBet, 0.2).toFixed(2))),
+    minimumDeposit,
+    reinvestmentStep,
+    strategyBalance: Math.max(
+      0,
+      Number(number(state.strategyBalance, minimumDeposit).toFixed(4))
+    ),
+    cycleInitialBet,
+    cycleTargetProfit: Math.max(
+      cycleInitialBet,
+      Number(number(state.cycleTargetProfit, cycleInitialBet).toFixed(2))
+    ),
+    nextBet: Math.max(
+      cycleInitialBet,
+      Number(number(state.nextBet, cycleInitialBet).toFixed(2))
+    ),
     activeBet:
       state.activeBet === null || state.activeBet === undefined
         ? null
-        : Math.max(0.2, Number(number(state.activeBet, 0.2).toFixed(2))),
+        : Math.max(
+            cycleInitialBet,
+            Number(number(state.activeBet, cycleInitialBet).toFixed(2))
+          ),
     awaitingResult: Boolean(state.awaitingResult),
     autoReloadPaused: Boolean(state.autoReloadPaused),
     lastProcessedRoundId: state.lastProcessedRoundId

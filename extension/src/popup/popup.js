@@ -4,18 +4,24 @@ const elements = {
   apiBaseUrl: document.querySelector("#apiBaseUrl"),
   telegramChatId: document.querySelector("#telegramChatId"),
   telegramStatus: document.querySelector("#telegramStatus"),
-  strategyTenPlusX348Enabled: document.querySelector(
-    "#strategyTenPlusX348Enabled"
+  strategyTenPlusX340Enabled: document.querySelector(
+    "#strategyTenPlusX340Enabled"
   ),
-  strategyTenPlusX348StopStep: document.querySelector(
-    "#strategyTenPlusX348StopStep"
+  strategyTenPlusX340StopStep: document.querySelector(
+    "#strategyTenPlusX340StopStep"
+  ),
+  strategyTenPlusX340ReinvestmentEnabled: document.querySelector(
+    "#strategyTenPlusX340ReinvestmentEnabled"
   ),
   strategyStopDetails: document.querySelector("#strategyStopDetails"),
-  strategyTenPlusX348NotifySeriesEnabled: document.querySelector(
-    "#strategyTenPlusX348NotifySeriesEnabled"
+  strategyReinvestmentNote: document.querySelector(
+    "#strategyReinvestmentNote"
   ),
-  strategyTenPlusX348NotifySeriesLength: document.querySelector(
-    "#strategyTenPlusX348NotifySeriesLength"
+  strategyTenPlusX340NotifySeriesEnabled: document.querySelector(
+    "#strategyTenPlusX340NotifySeriesEnabled"
+  ),
+  strategyTenPlusX340NotifySeriesLength: document.querySelector(
+    "#strategyTenPlusX340NotifySeriesLength"
   ),
   strategyDescription: document.querySelector("#strategyDescription"),
   strategyDescriptionDialog: document.querySelector(
@@ -64,9 +70,11 @@ const STAGE_LABELS = {
   "collector-error": "ошибка DOM-сборщика"
 };
 
-const STRATEGY_TARGET = 3.48;
+const STRATEGY_ID = "ten-plus-x340";
+const STRATEGY_FORMULA_VERSION = "deposit-v2";
+const STRATEGY_TARGET = 3.40;
 const STRATEGY_INITIAL_BET = 0.2;
-const STRATEGY_MIN_PROFIT = 0.2;
+const STRATEGY_REINVESTMENT_BET_INCREMENT = 0.01;
 const STRATEGY_BET_STEP = 0.01;
 
 const PREPARATION_STAGE_LABELS = {
@@ -83,6 +91,7 @@ const PREPARATION_STAGE_LABELS = {
 
 let refreshTimer = null;
 let settingsDirty = false;
+let currentStrategyState = null;
 
 populateStopOptions();
 
@@ -90,10 +99,11 @@ const settingsElements = [
   elements.enabled,
   elements.apiBaseUrl,
   elements.telegramChatId,
-  elements.strategyTenPlusX348Enabled,
-  elements.strategyTenPlusX348StopStep,
-  elements.strategyTenPlusX348NotifySeriesEnabled,
-  elements.strategyTenPlusX348NotifySeriesLength,
+  elements.strategyTenPlusX340Enabled,
+  elements.strategyTenPlusX340StopStep,
+  elements.strategyTenPlusX340ReinvestmentEnabled,
+  elements.strategyTenPlusX340NotifySeriesEnabled,
+  elements.strategyTenPlusX340NotifySeriesLength,
   elements.preparationEnabled,
   elements.preparationBet,
   elements.preparationCashout,
@@ -106,15 +116,19 @@ for (const element of settingsElements) {
   element.addEventListener("change", markSettingsDirty);
 }
 
-elements.strategyTenPlusX348Enabled.addEventListener(
+elements.strategyTenPlusX340Enabled.addEventListener(
   "change",
   syncStrategyFields
 );
-elements.strategyTenPlusX348StopStep.addEventListener(
+elements.strategyTenPlusX340StopStep.addEventListener(
   "change",
-  renderSelectedStopDetails
+  refreshStrategyCalculations
 );
-elements.strategyTenPlusX348NotifySeriesEnabled.addEventListener(
+elements.strategyTenPlusX340ReinvestmentEnabled.addEventListener(
+  "change",
+  refreshStrategyCalculations
+);
+elements.strategyTenPlusX340NotifySeriesEnabled.addEventListener(
   "change",
   syncStrategyNotificationFields
 );
@@ -173,21 +187,26 @@ function render(response) {
   } = response;
 
   elements.version.textContent = `v${version || "?"}`;
+  currentStrategyState = strategy || null;
   if (!settingsDirty && !isEditingSettings()) {
     elements.enabled.checked = Boolean(settings.enabled);
     elements.apiBaseUrl.value = settings.apiBaseUrl || "";
     elements.telegramChatId.value = settings.telegramChatId || "";
-    elements.strategyTenPlusX348Enabled.checked = Boolean(
-      settings.strategyTenPlusX348Enabled
+    elements.strategyTenPlusX340Enabled.checked = Boolean(
+      settings.strategyTenPlusX340Enabled
     );
-    elements.strategyTenPlusX348StopStep.value = String(
-      settings.strategyTenPlusX348StopStep || 0
+    elements.strategyTenPlusX340ReinvestmentEnabled.checked = Boolean(
+      settings.strategyTenPlusX340ReinvestmentEnabled
     );
-    elements.strategyTenPlusX348NotifySeriesEnabled.checked = Boolean(
-      settings.strategyTenPlusX348NotifySeriesEnabled
+    populateStopOptions(
+      getDisplayedInitialBet(settings, strategy),
+      settings.strategyTenPlusX340StopStep
     );
-    elements.strategyTenPlusX348NotifySeriesLength.value = String(
-      settings.strategyTenPlusX348NotifySeriesLength || 8
+    elements.strategyTenPlusX340NotifySeriesEnabled.checked = Boolean(
+      settings.strategyTenPlusX340NotifySeriesEnabled
+    );
+    elements.strategyTenPlusX340NotifySeriesLength.value = String(
+      settings.strategyTenPlusX340NotifySeriesLength || 8
     );
     elements.preparationEnabled.checked = Boolean(settings.preparationEnabled);
     elements.preparationBet.value = String(settings.preparationBet ?? 1);
@@ -268,7 +287,7 @@ function renderTelegramStatus(telegram, settings) {
 }
 
 function renderStrategyStatus(strategy, settings) {
-  const enabled = Boolean(settings?.strategyTenPlusX348Enabled);
+  const enabled = Boolean(settings?.strategyTenPlusX340Enabled);
   elements.strategyStatus.classList.remove("ok", "error");
 
   if (!enabled) {
@@ -284,19 +303,29 @@ function renderStrategyStatus(strategy, settings) {
 
   const stage = String(strategy.stage || "waiting");
   const streak = Math.max(0, Number(strategy.consecutiveLosses || 0));
-  const stop = Number(settings.strategyTenPlusX348StopStep || 0);
-  const stopDetails = getStopStepDetails(stop);
+  const stop = Number(settings.strategyTenPlusX340StopStep || 0);
+  const displayedInitialBet = getDisplayedInitialBet(settings, strategy);
+  const stopDetails = getStopStepDetails(stop, displayedInitialBet);
+  const minimumDeposit = getMinimumStartingDeposit(stop);
+  const reinvestmentStep = getReinvestmentBalanceStep(stop);
   const stopSuffix = stopDetails
     ? ` · стоп: шаг ${stopDetails.step}, ставка ${formatMoney(
         stopDetails.bet
       )}, общий минус ${formatMoney(stopDetails.cumulativeLoss)}`
     : " · без стопа";
+  const reinvestmentSuffix = settings.strategyTenPlusX340ReinvestmentEnabled
+    ? ` · реинвест: баланс ${formatMoney(
+        strategy?.strategyBalance ?? minimumDeposit
+      )}, минимум ${formatMoney(minimumDeposit)}, шаг ${formatMoney(
+        reinvestmentStep
+      )}, база ${formatMoney(displayedInitialBet)}`
+    : " · реинвест выключен";
 
   if (stage === "error") {
     elements.strategyStatus.textContent =
       `${strategy.message || "Ошибка стратегии"}: ${
         strategy.error || "проверьте интерфейс"
-      }${stopSuffix}`;
+      }${stopSuffix}${reinvestmentSuffix}`;
     elements.strategyStatus.classList.add("error");
     return;
   }
@@ -307,7 +336,7 @@ function renderStrategyStatus(strategy, settings) {
         strategy.activeBet || strategy.nextBet || 0.2
       )}, накопленный минус ${formatNumber(
         strategy.cumulativeLoss || 0
-      )}${stopSuffix}`;
+      )}${stopSuffix}${reinvestmentSuffix}`;
     elements.strategyStatus.classList.add("ok");
     return;
   }
@@ -315,17 +344,17 @@ function renderStrategyStatus(strategy, settings) {
   if (["preparing", "arming", "betting", "waiting-reset"].includes(stage)) {
     elements.strategyStatus.textContent = `${
       strategy.message || "Подготовка ставки"
-    }${stopSuffix}`;
+    }${stopSuffix}${reinvestmentSuffix}`;
     return;
   }
 
   elements.strategyStatus.textContent =
     `${strategy.message || `Ожидание сигнала: ${Math.min(streak, 10)}/10`}` +
-    stopSuffix;
+    stopSuffix + reinvestmentSuffix;
 }
 
 function renderPreparationStatus(preparation, settings) {
-  const strategyEnabled = Boolean(settings?.strategyTenPlusX348Enabled);
+  const strategyEnabled = Boolean(settings?.strategyTenPlusX340Enabled);
   if (strategyEnabled) {
     elements.preparationStatus.textContent =
       "Недоступна: интерфейсом управляет активная стратегия";
@@ -370,13 +399,13 @@ async function save() {
     1_000_000
   );
   const strategyStopStep = normalizeStopStep(
-    elements.strategyTenPlusX348StopStep.value
+    elements.strategyTenPlusX340StopStep.value
   );
   const telegramChatId = normalizeTelegramChatId(
     elements.telegramChatId.value
   );
   const seriesLength = normalizeSeriesLength(
-    elements.strategyTenPlusX348NotifySeriesLength.value
+    elements.strategyTenPlusX340NotifySeriesLength.value
   );
 
   if (reloadSeconds === null) {
@@ -405,19 +434,30 @@ async function save() {
 
   if (seriesLength === null) {
     setStatus("Длина серии должна быть от 1 до 10", true);
-    elements.strategyTenPlusX348NotifySeriesLength.focus();
+    elements.strategyTenPlusX340NotifySeriesLength.focus();
     return false;
   }
 
   if (strategyStopStep === null) {
     setStatus("Стоп должен быть выбран из списка шагов", true);
-    elements.strategyTenPlusX348StopStep.focus();
+    elements.strategyTenPlusX340StopStep.focus();
     return false;
   }
 
-  const strategyEnabled = elements.strategyTenPlusX348Enabled.checked;
+  const strategyEnabled = elements.strategyTenPlusX340Enabled.checked;
+  const reinvestmentEnabled =
+    elements.strategyTenPlusX340ReinvestmentEnabled.checked;
   const notifySeriesEnabled =
-    elements.strategyTenPlusX348NotifySeriesEnabled.checked;
+    elements.strategyTenPlusX340NotifySeriesEnabled.checked;
+
+  if (reinvestmentEnabled && strategyStopStep <= 0) {
+    setStatus(
+      "Для реинвестирования выберите конечный шаг стопа",
+      true
+    );
+    elements.strategyTenPlusX340StopStep.focus();
+    return false;
+  }
 
   if (notifySeriesEnabled && !telegramChatId) {
     setStatus("Для уведомления о серии укажите Telegram ID", true);
@@ -434,10 +474,11 @@ async function save() {
       enabled: elements.enabled.checked,
       apiBaseUrl: elements.apiBaseUrl.value,
       telegramChatId,
-      strategyTenPlusX348Enabled: strategyEnabled,
-      strategyTenPlusX348StopStep: strategyStopStep,
-      strategyTenPlusX348NotifySeriesEnabled: notifySeriesEnabled,
-      strategyTenPlusX348NotifySeriesLength: seriesLength,
+      strategyTenPlusX340Enabled: strategyEnabled,
+      strategyTenPlusX340StopStep: strategyStopStep,
+      strategyTenPlusX340ReinvestmentEnabled: reinvestmentEnabled,
+      strategyTenPlusX340NotifySeriesEnabled: notifySeriesEnabled,
+      strategyTenPlusX340NotifySeriesLength: seriesLength,
       preparationEnabled: strategyEnabled
         ? false
         : elements.preparationEnabled.checked,
@@ -495,34 +536,61 @@ async function resetDomState() {
   setStatus("DOM-база сброшена. Перезагрузите вкладку игры.", false, true);
 }
 
-function populateStopOptions() {
+function populateStopOptions(
+  initialBet = STRATEGY_INITIAL_BET,
+  selectedValue = elements.strategyTenPlusX340StopStep.value || "0"
+) {
+  elements.strategyTenPlusX340StopStep.replaceChildren();
+
   const unlimited = document.createElement("option");
   unlimited.value = "0";
   unlimited.textContent = "Без стопа";
-  elements.strategyTenPlusX348StopStep.append(unlimited);
+  elements.strategyTenPlusX340StopStep.append(unlimited);
 
   for (let step = 1; step <= 100; step += 1) {
-    const details = getStopStepDetails(step);
+    const details = getStopStepDetails(step, initialBet);
     const option = document.createElement("option");
     option.value = String(step);
     option.textContent =
       `Шаг ${step} — ставка ${formatMoney(details.bet)} · ` +
       `общий минус ${formatMoney(details.cumulativeLoss)}`;
-    elements.strategyTenPlusX348StopStep.append(option);
+    elements.strategyTenPlusX340StopStep.append(option);
   }
 
+  elements.strategyTenPlusX340StopStep.value = String(selectedValue || 0);
+  if (!elements.strategyTenPlusX340StopStep.value) {
+    elements.strategyTenPlusX340StopStep.value = "0";
+  }
   renderSelectedStopDetails();
+}
+
+function refreshStrategyCalculations() {
+  const stopStep = normalizeStopStep(
+    elements.strategyTenPlusX340StopStep.value
+  );
+  if (stopStep <= 0) {
+    elements.strategyTenPlusX340ReinvestmentEnabled.checked = false;
+  }
+
+  const selectedValue = String(stopStep);
+  populateStopOptions(getDisplayedInitialBet(), selectedValue);
+  syncStrategyFields();
 }
 
 function renderSelectedStopDetails() {
   const stopStep = normalizeStopStep(
-    elements.strategyTenPlusX348StopStep.value
+    elements.strategyTenPlusX340StopStep.value
   );
-  const details = getStopStepDetails(stopStep);
+  const initialBet = getDisplayedInitialBet();
+  const details = getStopStepDetails(stopStep, initialBet);
+  const minimumDeposit = getMinimumStartingDeposit(stopStep);
+  const reinvestmentStep = getReinvestmentBalanceStep(stopStep);
 
   if (!details) {
     elements.strategyStopDetails.textContent =
-      "Без ограничения числа повышений. Расчёт от стартовой ставки 0,20.";
+      `Без ограничения числа повышений. Текущая расчётная стартовая ставка — ${formatMoney(initialBet)}. ` +
+      "Минимальный депозит не рассчитывается, реинвестирование недоступно.";
+    renderReinvestmentNote(stopStep);
     return;
   }
 
@@ -530,17 +598,100 @@ function renderSelectedStopDetails() {
     `Шаг ${details.step}: ставка ${formatMoney(details.bet)}; ` +
     `общий потенциальный минус после проигрыша — ${formatMoney(
       details.cumulativeLoss
-    )}. Расчёт от стартовой ставки 0,20.`;
+    )}. Минимальный стартовый депозит — ${formatMoney(
+      minimumDeposit
+    )}; шаг реинвестирования — ${formatMoney(reinvestmentStep)}. ` +
+    `Расчёт от стартовой ставки ${formatMoney(initialBet)}.`;
+  renderReinvestmentNote(stopStep);
 }
 
-function getStopStepDetails(stepValue) {
+function renderReinvestmentNote(stopStep) {
+  const minimumDeposit = getMinimumStartingDeposit(stopStep);
+  const reinvestmentStep = getReinvestmentBalanceStep(stopStep);
+  if (minimumDeposit <= 0 || reinvestmentStep <= 0) {
+    elements.strategyReinvestmentNote.textContent =
+      "Для реинвестирования сначала выберите конечный шаг стопа.";
+    return;
+  }
+
+  elements.strategyReinvestmentNote.textContent =
+    `Минимальный виртуальный депозит для выбранного стопа — ${formatMoney(
+      minimumDeposit
+    )}. За каждые полные +${formatMoney(
+      reinvestmentStep
+    )} к балансу стартовая ставка следующего цикла увеличивается на 0,01.`;
+}
+
+function getDisplayedInitialBet(settings = null, strategy = null) {
+  const reinvestmentEnabled = settings
+    ? Boolean(settings.strategyTenPlusX340ReinvestmentEnabled)
+    : Boolean(elements.strategyTenPlusX340ReinvestmentEnabled.checked);
+  if (!reinvestmentEnabled) {
+    return STRATEGY_INITIAL_BET;
+  }
+
+  const stopStep = normalizeStopStep(
+    settings
+      ? settings.strategyTenPlusX340StopStep
+      : elements.strategyTenPlusX340StopStep.value
+  );
+  const minimumDeposit = getMinimumStartingDeposit(stopStep);
+  const reinvestmentStep = getReinvestmentBalanceStep(stopStep);
+  if (minimumDeposit <= 0 || reinvestmentStep <= 0) {
+    return STRATEGY_INITIAL_BET;
+  }
+
+  const state = strategy || currentStrategyState;
+  const expectedSignature = buildStrategyConfigSignature(
+    stopStep,
+    true
+  );
+  const stateMatchesConfiguration =
+    state?.configSignature === expectedSignature;
+  const balance = Math.max(
+    0,
+    Number(
+      stateMatchesConfiguration
+        ? state?.strategyBalance ?? minimumDeposit
+        : minimumDeposit
+    )
+  );
+  const profit = Math.max(0, balance - minimumDeposit);
+  const levels = Math.floor((profit + 1e-9) / reinvestmentStep);
+  return roundToCent(
+    STRATEGY_INITIAL_BET +
+      levels * STRATEGY_REINVESTMENT_BET_INCREMENT
+  );
+}
+
+function getMinimumStartingDeposit(stopStep) {
+  const details = getStopStepDetails(stopStep, STRATEGY_INITIAL_BET);
+  return details ? Math.ceil(details.cumulativeLoss - 1e-9) : 0;
+}
+
+function getReinvestmentBalanceStep(stopStep) {
+  const minimumDeposit = getMinimumStartingDeposit(stopStep);
+  return minimumDeposit > 0
+    ? roundToFour(minimumDeposit / 20)
+    : 0;
+}
+
+function buildStrategyConfigSignature(stopStep, reinvestmentEnabled) {
+  return (
+    `${STRATEGY_ID}|${normalizeStopStep(stopStep)}|` +
+    `${Boolean(reinvestmentEnabled) ? 1 : 0}|` +
+    STRATEGY_FORMULA_VERSION
+  );
+}
+
+function getStopStepDetails(stepValue, initialBet = STRATEGY_INITIAL_BET) {
   const step = Number(stepValue);
   if (!Number.isFinite(step) || step <= 0) {
     return null;
   }
 
   let cumulativeLoss = 0;
-  let bet = STRATEGY_INITIAL_BET;
+  let bet = initialBet;
 
   for (let currentStep = 1; currentStep <= Math.round(step); currentStep += 1) {
     cumulativeLoss = roundToCent(cumulativeLoss + bet);
@@ -552,19 +703,17 @@ function getStopStepDetails(stepValue) {
       };
     }
 
-    bet = calculateRecoveryBet(cumulativeLoss);
+    bet = calculateRecoveryBet(cumulativeLoss, initialBet);
   }
 
   return null;
 }
 
-function calculateRecoveryBet(cumulativeLoss) {
+function calculateRecoveryBet(cumulativeLoss, initialBet = STRATEGY_INITIAL_BET) {
+  const targetProfit = initialBet;
   const raw =
-    (cumulativeLoss + STRATEGY_MIN_PROFIT) / (STRATEGY_TARGET - 1);
-  return Math.max(
-    STRATEGY_INITIAL_BET,
-    ceilToStep(raw, STRATEGY_BET_STEP)
-  );
+    (cumulativeLoss + targetProfit) / (STRATEGY_TARGET - 1);
+  return Math.max(initialBet, ceilToStep(raw, STRATEGY_BET_STEP));
 }
 
 function ceilToStep(value, step) {
@@ -573,6 +722,10 @@ function ceilToStep(value, step) {
 
 function roundToCent(value) {
   return Number(Number(value).toFixed(2));
+}
+
+function roundToFour(value) {
+  return Number(Number(value).toFixed(4));
 }
 
 function formatMoney(value) {
@@ -622,8 +775,16 @@ function setStatus(message, error = false, ok = false) {
 }
 
 function syncStrategyFields() {
-  const strategyEnabled = elements.strategyTenPlusX348Enabled.checked;
-  elements.strategyTenPlusX348StopStep.disabled = !strategyEnabled;
+  const strategyEnabled = elements.strategyTenPlusX340Enabled.checked;
+  const stopStep = normalizeStopStep(
+    elements.strategyTenPlusX340StopStep.value
+  );
+  elements.strategyTenPlusX340StopStep.disabled = !strategyEnabled;
+  elements.strategyTenPlusX340ReinvestmentEnabled.disabled =
+    !strategyEnabled || stopStep <= 0;
+  if (stopStep <= 0) {
+    elements.strategyTenPlusX340ReinvestmentEnabled.checked = false;
+  }
   elements.preparationEnabled.disabled = strategyEnabled;
 
   if (strategyEnabled) {
@@ -637,15 +798,15 @@ function syncStrategyFields() {
 
 
 function syncStrategyNotificationFields() {
-  const strategyEnabled = elements.strategyTenPlusX348Enabled.checked;
-  elements.strategyTenPlusX348NotifySeriesEnabled.disabled = !strategyEnabled;
-  elements.strategyTenPlusX348NotifySeriesLength.disabled =
+  const strategyEnabled = elements.strategyTenPlusX340Enabled.checked;
+  elements.strategyTenPlusX340NotifySeriesEnabled.disabled = !strategyEnabled;
+  elements.strategyTenPlusX340NotifySeriesLength.disabled =
     !strategyEnabled ||
-    !elements.strategyTenPlusX348NotifySeriesEnabled.checked;
+    !elements.strategyTenPlusX340NotifySeriesEnabled.checked;
 }
 
 function syncPreparationFields() {
-  const strategyEnabled = elements.strategyTenPlusX348Enabled.checked;
+  const strategyEnabled = elements.strategyTenPlusX340Enabled.checked;
   const disabled = strategyEnabled || !elements.preparationEnabled.checked;
   elements.preparationEnabled.disabled = strategyEnabled;
   elements.preparationBet.disabled = disabled;

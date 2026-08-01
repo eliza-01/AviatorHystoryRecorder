@@ -11,9 +11,12 @@ const MAX_STRATEGY_SERIES_LENGTH = 10;
 
 export async function getSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.settings);
+  const migrated = migrateLegacyStrategySettings(
+    stored[STORAGE_KEYS.settings] || {}
+  );
   return sanitizeSettings({
     ...DEFAULT_SETTINGS,
-    ...(stored[STORAGE_KEYS.settings] || {})
+    ...migrated
   });
 }
 
@@ -85,7 +88,7 @@ export function normalizeTelegramChatId(value) {
 export function normalizeStrategySeriesLength(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
-    return DEFAULT_SETTINGS.strategyTenPlusX348NotifySeriesLength;
+    return DEFAULT_SETTINGS.strategyTenPlusX340NotifySeriesLength;
   }
 
   return Math.min(
@@ -117,18 +120,24 @@ function sanitizeSettings(value) {
     settings.pageAutoReloadSeconds
   );
   settings.telegramChatId = normalizeTelegramChatId(settings.telegramChatId);
-  settings.strategyTenPlusX348Enabled = Boolean(
-    settings.strategyTenPlusX348Enabled
+  settings.strategyTenPlusX340Enabled = Boolean(
+    settings.strategyTenPlusX340Enabled
   );
-  settings.strategyTenPlusX348StopStep = normalizeStrategyStopStep(
-    settings.strategyTenPlusX348StopStep
+  settings.strategyTenPlusX340StopStep = normalizeStrategyStopStep(
+    settings.strategyTenPlusX340StopStep
   );
-  settings.strategyTenPlusX348NotifySeriesEnabled = Boolean(
-    settings.strategyTenPlusX348NotifySeriesEnabled
+  settings.strategyTenPlusX340ReinvestmentEnabled = Boolean(
+    settings.strategyTenPlusX340ReinvestmentEnabled
   );
-  settings.strategyTenPlusX348NotifySeriesLength =
+  if (settings.strategyTenPlusX340StopStep <= 0) {
+    settings.strategyTenPlusX340ReinvestmentEnabled = false;
+  }
+  settings.strategyTenPlusX340NotifySeriesEnabled = Boolean(
+    settings.strategyTenPlusX340NotifySeriesEnabled
+  );
+  settings.strategyTenPlusX340NotifySeriesLength =
     normalizeStrategySeriesLength(
-      settings.strategyTenPlusX348NotifySeriesLength
+      settings.strategyTenPlusX340NotifySeriesLength
     );
   settings.preparationEnabled = Boolean(settings.preparationEnabled);
   settings.preparationBet = normalizePreparationBet(settings.preparationBet);
@@ -137,9 +146,62 @@ function sanitizeSettings(value) {
   );
   settings.apiBaseUrl = normalizeApiBaseUrl(settings.apiBaseUrl);
 
+  delete settings.strategyTenPlusX348Enabled;
+  delete settings.strategyTenPlusX348StopStep;
+  delete settings.strategyTenPlusX348ReinvestmentEnabled;
+  delete settings.strategyTenPlusX348NotifySeriesEnabled;
+  delete settings.strategyTenPlusX348NotifySeriesLength;
+
   // Активная стратегия полностью управляет первым блоком ставки.
-  if (settings.strategyTenPlusX348Enabled) {
+  if (settings.strategyTenPlusX340Enabled) {
     settings.preparationEnabled = false;
+  }
+
+  return settings;
+}
+
+function migrateLegacyStrategySettings(value) {
+  const settings = { ...(value || {}) };
+
+  // Переносим только безопасные пользовательские настройки. Стоп новой
+  // стратегии намеренно получает рекомендованное значение 12, а старое
+  // состояние x3.48 не продолжается под новым множителем.
+  if (
+    !Object.prototype.hasOwnProperty.call(settings, "strategyTenPlusX340Enabled") &&
+    Object.prototype.hasOwnProperty.call(settings, "strategyTenPlusX348Enabled")
+  ) {
+    settings.strategyTenPlusX340Enabled = Boolean(
+      settings.strategyTenPlusX348Enabled
+    );
+  }
+
+  if (
+    !Object.prototype.hasOwnProperty.call(
+      settings,
+      "strategyTenPlusX340NotifySeriesEnabled"
+    ) &&
+    Object.prototype.hasOwnProperty.call(
+      settings,
+      "strategyTenPlusX348NotifySeriesEnabled"
+    )
+  ) {
+    settings.strategyTenPlusX340NotifySeriesEnabled = Boolean(
+      settings.strategyTenPlusX348NotifySeriesEnabled
+    );
+  }
+
+  if (
+    !Object.prototype.hasOwnProperty.call(
+      settings,
+      "strategyTenPlusX340NotifySeriesLength"
+    ) &&
+    Object.prototype.hasOwnProperty.call(
+      settings,
+      "strategyTenPlusX348NotifySeriesLength"
+    )
+  ) {
+    settings.strategyTenPlusX340NotifySeriesLength =
+      settings.strategyTenPlusX348NotifySeriesLength;
   }
 
   return settings;

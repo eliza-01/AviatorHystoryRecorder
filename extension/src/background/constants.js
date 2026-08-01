@@ -8,10 +8,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   preparationBet: 1,
   preparationCashout: 2,
   telegramChatId: "",
-  strategyTenPlusX348Enabled: false,
-  strategyTenPlusX348StopStep: 0,
-  strategyTenPlusX348NotifySeriesEnabled: false,
-  strategyTenPlusX348NotifySeriesLength: 8
+  strategyTenPlusX340Enabled: false,
+  strategyTenPlusX340StopStep: 12,
+  strategyTenPlusX340ReinvestmentEnabled: false,
+  strategyTenPlusX340NotifySeriesEnabled: false,
+  strategyTenPlusX340NotifySeriesLength: 8
 });
 
 export const STORAGE_KEYS = Object.freeze({

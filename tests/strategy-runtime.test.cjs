@@ -26,7 +26,13 @@ function makeSnapshot(lossCount, prefix = 'r') {
   };
 }
 
-async function createRuntime({ initialState = null, owner = true, notifyLength = 8 } = {}) {
+async function createRuntime({
+  initialState = null,
+  owner = true,
+  notifyLength = 8,
+  reinvestmentEnabled = false,
+  stopStep = 12
+} = {}) {
   const listeners = new Map();
   const storageChangeListeners = [];
   const actions = [];
@@ -34,7 +40,8 @@ async function createRuntime({ initialState = null, owner = true, notifyLength =
   let savedState = initialState;
   const runtimeSettings = {
     enabled: true,
-    stopStep: 13,
+    stopStep,
+    reinvestmentEnabled,
     telegramConfigured: true,
     notifySeriesEnabled: true,
     notifySeriesLength: notifyLength
@@ -100,11 +107,12 @@ async function createRuntime({ initialState = null, owner = true, notifyLength =
           case 'GET_CAPTURE_STATE':
             return {
               ok: true,
-              strategyTenPlusX348Enabled: runtimeSettings.enabled,
-              strategyTenPlusX348StopStep: runtimeSettings.stopStep,
+              strategyTenPlusX340Enabled: runtimeSettings.enabled,
+              strategyTenPlusX340StopStep: runtimeSettings.stopStep,
+              strategyTenPlusX340ReinvestmentEnabled: runtimeSettings.reinvestmentEnabled,
               telegramConfigured: runtimeSettings.telegramConfigured,
-              strategyTenPlusX348NotifySeriesEnabled: runtimeSettings.notifySeriesEnabled,
-              strategyTenPlusX348NotifySeriesLength: runtimeSettings.notifySeriesLength,
+              strategyTenPlusX340NotifySeriesEnabled: runtimeSettings.notifySeriesEnabled,
+              strategyTenPlusX340NotifySeriesLength: runtimeSettings.notifySeriesLength,
               strategyState: savedState
             };
           case 'CLAIM_STRATEGY_CONTROLLER':
@@ -190,6 +198,9 @@ async function createRuntime({ initialState = null, owner = true, notifyLength =
   const runtime = await createRuntime();
   await runtime.snapshot(makeSnapshot(7));
   assert.strictEqual(runtime.actions.length, 0, '7/10 must not prepare');
+  assert.strictEqual(runtime.getState().minimumDeposit, 20);
+  assert.strictEqual(runtime.getState().reinvestmentStep, 1);
+  assert.strictEqual(runtime.getState().strategyBalance, 20);
 
   await runtime.snapshot(makeSnapshot(8));
   assert.deepStrictEqual(runtime.actions.map((item) => item.type), ['PREPARE']);
@@ -241,6 +252,63 @@ async function createRuntime({ initialState = null, owner = true, notifyLength =
   assert.strictEqual(progression.getState().step, 3);
   assert.strictEqual(progression.getState().activeBet, 0.25);
   assert.strictEqual(progression.getState().cumulativeLoss, 0.4);
+
+  for (let lossNumber = 3; lossNumber <= 12; lossNumber += 1) {
+    loss.values.unshift(1.2);
+    loss.ids.unshift(`p${10 + lossNumber}`);
+    await progression.snapshot(loss);
+  }
+  const placedBets = progression.actions
+    .filter((item) => item.type === 'PREPARE_AND_BET')
+    .map((item) => item.settings.bet);
+  assert.deepStrictEqual(placedBets, [
+    0.20, 0.20, 0.25, 0.36, 0.51, 0.72,
+    1.02, 1.45, 2.05, 2.90, 4.11, 5.83
+  ]);
+  assert.strictEqual(progression.getState().stoppedCycles, 1);
+  assert.strictEqual(progression.getState().awaitingResult, false);
+
+  const reinvestment = await createRuntime({
+    reinvestmentEnabled: true,
+    initialState: {
+      version: 3,
+      strategyId: 'ten-plus-x340',
+      configSignature: 'ten-plus-x340|12|1|deposit-v2',
+      initialized: true,
+      stage: 'waiting',
+      consecutiveLosses: 0,
+      minimumDeposit: 20,
+      reinvestmentStep: 1,
+      strategyBalance: 21,
+      lastProcessedRoundId: 'ri0'
+    }
+  });
+  await reinvestment.snapshot(makeSnapshot(8, 'ri'));
+  const lastPreparation = reinvestment.actions.at(-1);
+  assert.strictEqual(lastPreparation.type, 'PREPARE');
+  assert.strictEqual(lastPreparation.settings.bet, 0.21,
+    'reinvestment must raise the next cycle base bet after +1.00');
+
+  const stopNineReinvestment = await createRuntime({
+    reinvestmentEnabled: true,
+    stopStep: 9,
+    initialState: {
+      version: 3,
+      strategyId: 'ten-plus-x340',
+      configSignature: 'ten-plus-x340|9|1|deposit-v2',
+      initialized: true,
+      stage: 'waiting',
+      consecutiveLosses: 0,
+      minimumDeposit: 7,
+      reinvestmentStep: 0.35,
+      strategyBalance: 7.35,
+      lastProcessedRoundId: 'ri90'
+    }
+  });
+  await stopNineReinvestment.snapshot(makeSnapshot(8, 'ri9'));
+  const stopNinePreparation = stopNineReinvestment.actions.at(-1);
+  assert.strictEqual(stopNinePreparation.settings.bet, 0.21,
+    'stop 9 must use minimum deposit 7 and reinvestment step 0.35');
 
   const delayedBatch = await createRuntime();
   await delayedBatch.snapshot(makeSnapshot(7, 'b'));

@@ -449,3 +449,13 @@ button.secondary {
 .strategy-dialog li + li {
   margin-top: 7px;
 }
+
+.reinvestment-switch {
+  margin-top: 10px;
+}
+
+.strategy-reinvestment-note {
+  display: block;
+  margin: 6px 0 12px;
+  line-height: 1.35;
+}

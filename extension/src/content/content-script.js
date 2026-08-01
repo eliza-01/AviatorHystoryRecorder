@@ -113,7 +113,7 @@
       }
 
       const previousSuspended = pageAutoReloadSuspendedByStrategy;
-      strategyEnabled = Boolean(response.strategyTenPlusX348Enabled);
+      strategyEnabled = Boolean(response.strategyTenPlusX340Enabled);
       strategyRuntimeState = response.strategyState || null;
       pageAutoReloadSuspendedByStrategy = Boolean(
         strategyEnabled && strategyRuntimeState?.autoReloadPaused
@@ -154,7 +154,7 @@
         60
       );
       pageAutoReloadEnabled = Boolean(response.pageAutoReloadEnabled);
-      strategyEnabled = Boolean(response.strategyTenPlusX348Enabled);
+      strategyEnabled = Boolean(response.strategyTenPlusX340Enabled);
       strategyRuntimeState = response.strategyState || null;
       pageAutoReloadSuspendedByStrategy = Boolean(
         strategyEnabled && strategyRuntimeState?.autoReloadPaused
@@ -525,20 +525,20 @@
     const stage = String(state.stage || "waiting");
 
     if (stage === "error") {
-      strategyBadgeText.textContent = `10+ - x3.48 · ошибка: ${
+      strategyBadgeText.textContent = `10+ - x3.40 · ошибка: ${
         state.error || "проверьте интерфейс"
       }`;
     } else if (state.awaitingResult) {
       strategyBadgeText.textContent =
-        `10+ - x3.48 · шаг ${state.step || 1} · ставка ${formatBadgeNumber(
+        `10+ - x3.40 · шаг ${state.step || 1} · ставка ${formatBadgeNumber(
           state.activeBet || state.nextBet || 0.2
         )} · ждём результат`;
     } else if (["preparing", "arming", "betting", "waiting-reset"].includes(stage)) {
       strategyBadgeText.textContent =
-        `10+ - x3.48 · ${state.message || "подготовка ставки"}`;
+        `10+ - x3.40 · ${state.message || "подготовка ставки"}`;
     } else {
       strategyBadgeText.textContent =
-        `10+ - x3.48 · серия ${Math.min(streak, 10)}/10`;
+        `10+ - x3.40 · серия ${Math.min(streak, 10)}/10`;
     }
 
     strategyBadgeProgress.style.transform = `scaleX(${progress.toFixed(4)})`;
