@@ -7,11 +7,11 @@
   const INTERFACE_CHANNEL = "aviator-preparation-v2";
   const CONTROLLER_SOURCE = "aviator-strategy-controller";
   const BRIDGE_SOURCE = "aviator-preparation-page-bridge";
-  const STRATEGY_ID = "ten-plus-x340";
-  const STRATEGY_NAME = "10+ - x3.40";
-  const TARGET = 3.40;
-  const SIGNAL_LENGTH = 10;
-  const AUTO_RELOAD_PAUSE_AT = 8;
+  const DEFAULT_STRATEGY_ID = "ten-plus-x340";
+  const DEFAULT_STRATEGY_NAME = "10+ - x3.40";
+  const DEFAULT_TARGET = 3.40;
+  const DEFAULT_SIGNAL_LENGTH = 10;
+  const DEFAULT_AUTO_RELOAD_PAUSE_AT = 8;
   const STATE_VERSION = 3;
   const REINVESTMENT_FORMULA_VERSION = "deposit-v2";
   const INITIAL_BET = 0.2;
@@ -73,20 +73,7 @@
         throw new Error(response?.error || "Не удалось получить настройки стратегии");
       }
 
-      const nextSettings = {
-        enabled: Boolean(response.strategyTenPlusX340Enabled),
-        stopStep: normalizeStopStep(response.strategyTenPlusX340StopStep),
-        reinvestmentEnabled: Boolean(
-          response.strategyTenPlusX340ReinvestmentEnabled
-        ),
-        telegramConfigured: Boolean(response.telegramConfigured),
-        notifySeriesEnabled: Boolean(
-          response.strategyTenPlusX340NotifySeriesEnabled
-        ),
-        notifySeriesLength: normalizeSeriesLength(
-          response.strategyTenPlusX340NotifySeriesLength
-        )
-      };
+      const nextSettings = normalizeActiveStrategySettings(response);
       const signature = buildConfigSignature(nextSettings);
       const criticalConfigurationChanged = Boolean(
         previousSettings &&
@@ -343,8 +330,8 @@
     if (previousIndex === 0) {
       if (
         state.stage === "waiting" &&
-        state.consecutiveLosses >= AUTO_RELOAD_PAUSE_AT &&
-        state.consecutiveLosses < SIGNAL_LENGTH
+        state.consecutiveLosses >= strategyPauseAt() &&
+        state.consecutiveLosses < strategySignalLength()
       ) {
         await ensureSignalInterfacePrepared();
       }
@@ -386,7 +373,7 @@
   async function initializeFromSnapshot(rounds) {
     let streak = 0;
     for (const round of rounds) {
-      if (round.multiplier <= TARGET) {
+      if (round.multiplier <= strategyTarget()) {
         streak += 1;
       } else {
         break;
@@ -399,22 +386,22 @@
       consecutiveLosses: streak,
       lastProcessedRoundId: rounds[0].roundId,
       lastMultiplier: rounds[0].multiplier,
-      autoReloadPaused: streak >= AUTO_RELOAD_PAUSE_AT,
-      message: `Ожидание сигнала: ${Math.min(streak, SIGNAL_LENGTH)}/${SIGNAL_LENGTH}`
+      autoReloadPaused: streak >= strategyPauseAt(),
+      message: `Ожидание сигнала: ${Math.min(streak, strategySignalLength())}/${strategySignalLength()}`
     };
 
-    if (streak >= SIGNAL_LENGTH) {
+    if (streak >= strategySignalLength()) {
       state.stage = "waiting-reset";
       state.autoReloadPaused = true;
       state.message =
-        `Серия ${streak}/10 уже шла при запуске. ` +
-        "Ставки пропущены для безопасности; ждём результат выше 3.40";
+        `Серия ${streak}/${strategySignalLength()} уже шла при запуске. ` +
+        `Ставки пропущены для безопасности; ждём результат выше ${formatMoney(strategyTarget())}`;
       await persistState();
       return;
     }
 
     await persistState();
-    if (streak >= AUTO_RELOAD_PAUSE_AT) {
+    if (streak >= strategyPauseAt()) {
       await ensureSignalInterfacePrepared();
     }
   }
@@ -429,17 +416,18 @@
     }
 
     if (state.stage === "waiting-reset" && !state.awaitingResult) {
-      if (round.multiplier > TARGET) {
+      if (round.multiplier > strategyTarget()) {
         state.stage = "waiting";
         state.consecutiveLosses = 0;
         state.autoReloadPaused = false;
-        state.message = "Предыдущая серия сброшена. Ожидание нового сигнала: 0/10";
+        state.message =
+          `Предыдущая серия сброшена. Ожидание нового сигнала: 0/${strategySignalLength()}`;
         signalInterfacePrepared = false;
       } else {
         state.consecutiveLosses += 1;
         state.autoReloadPaused = true;
         state.message =
-          `Пропускаем уже начавшуюся серию: ${state.consecutiveLosses} результатов ≤ 3.40. ` +
+          `Пропускаем уже начавшуюся серию: ${state.consecutiveLosses} результатов ≤ ${formatMoney(strategyTarget())}. ` +
           "Ждём её сброса";
       }
       await persistState();
@@ -447,7 +435,7 @@
     }
 
     if (state.awaitingResult) {
-      if (round.multiplier > TARGET) {
+      if (round.multiplier > strategyTarget()) {
         const notification = finishProfitableCycle(round.multiplier);
         queueStrategyNotification(
           "profit",
@@ -499,11 +487,11 @@
       return false;
     }
 
-    if (round.multiplier > TARGET) {
+    if (round.multiplier > strategyTarget()) {
       state.consecutiveLosses = 0;
       state.autoReloadPaused = false;
       state.stage = "waiting";
-      state.message = "Ожидание сигнала: 0/10";
+      state.message = `Ожидание сигнала: 0/${strategySignalLength()}`;
       signalInterfacePrepared = false;
       await persistState();
       return true;
@@ -511,23 +499,23 @@
 
     state.consecutiveLosses += 1;
     state.autoReloadPaused =
-      state.consecutiveLosses >= AUTO_RELOAD_PAUSE_AT;
+      state.consecutiveLosses >= strategyPauseAt();
     state.stage = "waiting";
     state.message = `Ожидание сигнала: ${Math.min(
       state.consecutiveLosses,
-      SIGNAL_LENGTH
-    )}/${SIGNAL_LENGTH}`;
+      strategySignalLength()
+    )}/${strategySignalLength()}`;
 
     if (!hasFollowingRound) {
       maybeQueueSeriesNotificationForRound(round);
     }
 
-    if (state.consecutiveLosses >= SIGNAL_LENGTH) {
+    if (state.consecutiveLosses >= strategySignalLength()) {
       if (hasFollowingRound) {
         state.stage = "waiting-reset";
         state.autoReloadPaused = true;
         state.message =
-          "Сигнал 10/10 обнаружен с опозданием после уже прошедшего раунда. " +
+          `Сигнал ${strategySignalLength()}/${strategySignalLength()} обнаружен с опозданием после уже прошедшего раунда. ` +
           "Ставки пропущены; ждём сброса серии";
         await persistState();
         return true;
@@ -542,7 +530,7 @@
     await persistState();
     if (
       !hasFollowingRound &&
-      state.consecutiveLosses >= AUTO_RELOAD_PAUSE_AT
+      state.consecutiveLosses >= strategyPauseAt()
     ) {
       await ensureSignalInterfacePrepared();
     }
@@ -552,7 +540,7 @@
   function beginBettingCycle() {
     const cycleInitialBet = calculateNextCycleInitialBet();
     state.stage = "betting";
-    state.consecutiveLosses = SIGNAL_LENGTH;
+    state.consecutiveLosses = strategySignalLength();
     state.step = 0;
     state.cumulativeLoss = 0;
     state.cycleInitialBet = cycleInitialBet;
@@ -565,8 +553,8 @@
     state.signalInterfacePrepared = Boolean(signalInterfacePrepared);
     state.signalPreparationError = null;
     state.message = signalInterfacePrepared
-      ? `Сигнал 10/10. Интерфейс готов, размещаем ${formatMoney(cycleInitialBet)}`
-      : `Сигнал 10/10. Подготовка ставки ${formatMoney(cycleInitialBet)}`;
+      ? `Сигнал ${strategySignalLength()}/${strategySignalLength()}. Интерфейс готов, размещаем ${formatMoney(cycleInitialBet)}`
+      : `Сигнал ${strategySignalLength()}/${strategySignalLength()}. Подготовка ставки ${formatMoney(cycleInitialBet)}`;
   }
 
   async function ensureSignalInterfacePrepared() {
@@ -574,8 +562,8 @@
       !settings?.enabled ||
       !state ||
       state.awaitingResult ||
-      state.consecutiveLosses < AUTO_RELOAD_PAUSE_AT ||
-      state.consecutiveLosses >= SIGNAL_LENGTH ||
+      state.consecutiveLosses < strategyPauseAt() ||
+      state.consecutiveLosses >= strategySignalLength() ||
       signalInterfacePrepared
     ) {
       return;
@@ -592,7 +580,7 @@
       state.signalPreparationError = null;
       const preparedBet = calculateNextCycleInitialBet();
       state.message =
-        `Серия ${state.consecutiveLosses}/10. ` +
+        `Серия ${state.consecutiveLosses}/${strategySignalLength()}. ` +
         `Автообновление остановлено, готовим интерфейс к ставке ${formatMoney(preparedBet)}`;
       await persistState();
 
@@ -603,8 +591,8 @@
         state.signalPreparationError = null;
         state.stage = "waiting";
         state.message =
-          `Интерфейс готов: ставка ${formatMoney(preparedBet)}, авто кешаут 3.40. ` +
-          `Ожидание сигнала: ${state.consecutiveLosses}/10`;
+          `Интерфейс готов: ставка ${formatMoney(preparedBet)}, авто кешаут ${formatMoney(strategyTarget())}. ` +
+          `Ожидание сигнала: ${state.consecutiveLosses}/${strategySignalLength()}`;
         await persistState();
       } catch (error) {
         signalInterfacePrepared = false;
@@ -614,7 +602,7 @@
         state.stage = "waiting";
         state.autoReloadPaused = true;
         state.message =
-          `Не удалось заранее подготовить интерфейс на ${state.consecutiveLosses}/10. ` +
+          `Не удалось заранее подготовить интерфейс на ${state.consecutiveLosses}/${strategySignalLength()}. ` +
           "Перед ставкой будет выполнена повторная проверка";
         await persistState();
       } finally {
@@ -665,7 +653,7 @@
     const completedStep = Math.max(1, Number(state.step || 1));
     const drawdown = roundToCent(state.cumulativeLoss);
     const pnl = Number(
-      (activeBet * (TARGET - 1) - state.cumulativeLoss).toFixed(4)
+      (activeBet * (strategyTarget() - 1) - state.cumulativeLoss).toFixed(4)
     );
     const notification = {
       step: completedStep,
@@ -681,7 +669,7 @@
       Math.max(
         0,
         Number(
-          state.strategyBalance ?? calculateMinimumStartingDeposit()
+          state.strategyBalance ?? calculateConfiguredStartingDeposit()
         ) + pnl
       )
     );
@@ -723,7 +711,7 @@
       Math.max(
         0,
         Number(
-          state.strategyBalance ?? calculateMinimumStartingDeposit()
+          state.strategyBalance ?? calculateConfiguredStartingDeposit()
         ) + pnl
       )
     );
@@ -770,11 +758,12 @@
       return INITIAL_BET;
     }
 
+    const startingDeposit = calculateConfiguredStartingDeposit();
     const balance = Math.max(
       0,
-      Number(state?.strategyBalance ?? minimumDeposit)
+      Number(state?.strategyBalance ?? startingDeposit)
     );
-    const profit = Math.max(0, balance - minimumDeposit);
+    const profit = Math.max(0, balance - startingDeposit);
     const levels = Math.floor((profit + 1e-9) / reinvestmentStep);
     return roundToCent(
       INITIAL_BET + levels * REINVESTMENT_BET_INCREMENT
@@ -816,7 +805,7 @@
         };
       }
 
-      const raw = (cumulativeLoss + initialBet) / (TARGET - 1);
+      const raw = (cumulativeLoss + initialBet) / (strategyTarget() - 1);
       bet = Math.max(initialBet, ceilToStep(raw, BET_STEP));
     }
 
@@ -832,7 +821,7 @@
       cycleInitialBet,
       Number(state?.cycleTargetProfit || cycleInitialBet || MIN_PROFIT)
     );
-    const raw = (cumulativeLoss + cycleTargetProfit) / (TARGET - 1);
+    const raw = (cumulativeLoss + cycleTargetProfit) / (strategyTarget() - 1);
     return Math.max(cycleInitialBet, ceilToStep(raw, BET_STEP));
   }
 
@@ -893,7 +882,7 @@
       sendInterfaceMessage(type, requestId, {
         settings: {
           bet,
-          cashout: TARGET
+          cashout: strategyTarget()
         }
       });
     });
@@ -999,18 +988,20 @@
 
   function createInitialState(configSignature) {
     const minimumDeposit = calculateMinimumStartingDeposit();
+    const startingDeposit = calculateConfiguredStartingDeposit();
     const reinvestmentStep = calculateReinvestmentBalanceStep();
     return {
       version: STATE_VERSION,
-      strategyId: STRATEGY_ID,
+      strategyId: strategyId(),
       stage: "waiting",
       initialized: false,
       consecutiveLosses: 0,
       step: 0,
       cumulativeLoss: 0,
       minimumDeposit,
+      startingDeposit,
       reinvestmentStep,
-      strategyBalance: minimumDeposit,
+      strategyBalance: startingDeposit,
       cycleInitialBet: INITIAL_BET,
       cycleTargetProfit: MIN_PROFIT,
       nextBet: INITIAL_BET,
@@ -1044,10 +1035,11 @@
       step: Math.max(0, Number(source.step || 0)),
       cumulativeLoss: Math.max(0, Number(source.cumulativeLoss || 0)),
       minimumDeposit: initial.minimumDeposit,
+      startingDeposit: initial.startingDeposit,
       reinvestmentStep: initial.reinvestmentStep,
       strategyBalance: Math.max(
         0,
-        Number(source.strategyBalance ?? initial.minimumDeposit)
+        Number(source.strategyBalance ?? initial.startingDeposit)
       ),
       cycleInitialBet: Math.max(
         INITIAL_BET,
@@ -1089,7 +1081,7 @@
     return Boolean(
       value &&
         value.version === STATE_VERSION &&
-        value.strategyId === STRATEGY_ID &&
+        value.strategyId === strategyId() &&
         value.configSignature === signature
     );
   }
@@ -1184,10 +1176,105 @@
       });
   }
 
+  function normalizeActiveStrategySettings(response) {
+    const source = response?.activeStrategy;
+    if (!source || typeof source !== "object" || !source.id) {
+      return {
+        enabled: false,
+        id: DEFAULT_STRATEGY_ID,
+        name: DEFAULT_STRATEGY_NAME,
+        target: DEFAULT_TARGET,
+        signalLength: DEFAULT_SIGNAL_LENGTH,
+        pauseAt: DEFAULT_AUTO_RELOAD_PAUSE_AT,
+        stopStep: 0,
+        minimumDeposit: 0,
+        startingDeposit: 0,
+        reinvestmentEnabled: false,
+        telegramConfigured: Boolean(response?.telegramConfigured),
+        notifySeriesEnabled: false,
+        notifySeriesLength: DEFAULT_AUTO_RELOAD_PAUSE_AT
+      };
+    }
+
+    const signalLength = Math.max(1, Math.round(Number(source.signalLength) || 1));
+    const pauseAt = Math.min(
+      signalLength - 1,
+      Math.max(1, Math.round(Number(source.pauseAt) || signalLength - 2))
+    );
+    const minimumDeposit = Math.max(0, Number(source.minimumDeposit) || 0);
+    const startingDeposit = normalizeStartingDeposit(
+      source.startingDeposit,
+      minimumDeposit
+    );
+
+    return {
+      enabled: true,
+      id: String(source.id),
+      name: String(source.name || source.id),
+      target: Math.max(1.01, Number(source.target) || DEFAULT_TARGET),
+      signalLength,
+      pauseAt,
+      stopStep: normalizeStopStep(source.stopStep),
+      minimumDeposit,
+      startingDeposit,
+      reinvestmentEnabled: Boolean(source.reinvestmentEnabled),
+      telegramConfigured: Boolean(response.telegramConfigured),
+      notifySeriesEnabled: Boolean(source.notifySeriesEnabled),
+      notifySeriesLength: Math.min(
+        signalLength,
+        Math.max(1, Math.round(Number(source.notifySeriesLength) || pauseAt))
+      )
+    };
+  }
+
+  function strategyId() {
+    return String(settings?.id || DEFAULT_STRATEGY_ID);
+  }
+
+  function strategyName() {
+    return String(settings?.name || DEFAULT_STRATEGY_NAME);
+  }
+
+  function strategyTarget() {
+    return Math.max(1.01, Number(settings?.target || DEFAULT_TARGET));
+  }
+
+  function strategySignalLength() {
+    return Math.max(1, Math.round(Number(settings?.signalLength || DEFAULT_SIGNAL_LENGTH)));
+  }
+
+  function strategyPauseAt() {
+    return Math.min(
+      strategySignalLength() - 1,
+      Math.max(1, Math.round(Number(settings?.pauseAt || DEFAULT_AUTO_RELOAD_PAUSE_AT)))
+    );
+  }
+
+  function normalizeStartingDeposit(value, minimumDeposit = 0) {
+    const minimum = Math.max(0, Number(minimumDeposit) || 0);
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= minimum ? parsed : minimum;
+  }
+
+  function calculateConfiguredStartingDeposit() {
+    const minimumDeposit = calculateMinimumStartingDeposit();
+    return normalizeStartingDeposit(settings?.startingDeposit, minimumDeposit);
+  }
+
   function buildConfigSignature(value) {
+    const id = String(value?.id || DEFAULT_STRATEGY_ID);
+    const base =
+      `${id}|${normalizeStopStep(value?.stopStep)}|` +
+      `${Boolean(value?.reinvestmentEnabled) ? 1 : 0}|`;
+
+    // Сохраняем совместимость с уже записанным состоянием x3.40.
+    if (id === DEFAULT_STRATEGY_ID) {
+      return base + REINVESTMENT_FORMULA_VERSION;
+    }
+
     return (
-      `${STRATEGY_ID}|${normalizeStopStep(value?.stopStep)}|` +
-      `${Boolean(value?.reinvestmentEnabled) ? 1 : 0}|` +
+      base +
+      `${normalizeStartingDeposit(value?.startingDeposit, value?.minimumDeposit)}|` +
       REINVESTMENT_FORMULA_VERSION
     );
   }
@@ -1195,8 +1282,8 @@
   function normalizeSeriesLength(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed)
-      ? Math.min(SIGNAL_LENGTH, Math.max(1, Math.round(parsed)))
-      : 8;
+      ? Math.min(strategySignalLength(), Math.max(1, Math.round(parsed)))
+      : Math.max(1, strategyPauseAt());
   }
 
   function normalizeStopStep(value) {
@@ -1231,10 +1318,10 @@
       "waiting-game": "Ожидание интерфейса Aviator",
       "switching-auto": "Проверка вкладки «Авто»",
       "enabling-cashout": "Проверка авто кешаута",
-      "setting-cashout": "Установка кэшаута 3.40",
+      "setting-cashout": `Установка кэшаута ${formatMoney(strategyTarget())}`,
       "setting-bet": "Установка размера ставки",
       "placing-bet": "Нажатие кнопки «Ставка»"
     };
-    return labels[stage] || `${STRATEGY_NAME}: подготовка ставки`;
+    return labels[stage] || `${strategyName()}: подготовка ставки`;
   }
 })();

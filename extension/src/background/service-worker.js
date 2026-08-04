@@ -16,8 +16,13 @@ import {
 import {
   getSettings,
   normalizeStrategyStopStep,
+  normalizeX512StartingDeposit,
   saveSettings
 } from "./settings-service.js";
+import {
+  getActiveStrategyConfig,
+  isKnownStrategyId
+} from "./strategy-config.js";
 import { getStats } from "./stats-service.js";
 import { isAviatorTabUrl } from "./url-service.js";
 
@@ -26,7 +31,6 @@ const COLLECTOR_FRAME_TTL_MS = 10 * 60 * 1000;
 const PREPARATION_FRAME_TTL_MS = 10 * 60 * 1000;
 const STRATEGY_STATE_TTL_MS = 24 * 60 * 60 * 1000;
 const STRATEGY_CONTROLLER_TTL_MS = 2 * 60 * 1000;
-const STRATEGY_ID = "ten-plus-x340";
 const strategyControllerLocks = new Map();
 
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -170,7 +174,12 @@ async function getCaptureState(sender, message) {
   const settings = await getSettings();
   const topUrl = sender.tab?.url || message.pageUrl || "";
   const aviatorTab = isAviatorTabUrl(topUrl);
-  const strategyState = await getStrategyStateForTab(sender.tab?.id, topUrl);
+  const activeStrategy = getActiveStrategyConfig(settings);
+  const strategyState = await getStrategyStateForTab(
+    sender.tab?.id,
+    topUrl,
+    activeStrategy?.id || null
+  );
 
   return {
     ok: true,
@@ -198,13 +207,29 @@ async function getCaptureState(sender, message) {
     strategyTenPlusX340ReinvestmentEnabled: Boolean(
       settings.strategyTenPlusX340ReinvestmentEnabled
     ),
-    telegramConfigured: Boolean(settings.telegramChatId),
     strategyTenPlusX340NotifySeriesEnabled: Boolean(
       settings.strategyTenPlusX340NotifySeriesEnabled
     ),
     strategyTenPlusX340NotifySeriesLength: Number(
       settings.strategyTenPlusX340NotifySeriesLength || 8
     ),
+    strategyFifteenPlusX512Enabled: Boolean(
+      settings.strategyFifteenPlusX512Enabled && aviatorTab
+    ),
+    strategyFifteenPlusX512ReinvestmentEnabled: Boolean(
+      settings.strategyFifteenPlusX512ReinvestmentEnabled
+    ),
+    strategyFifteenPlusX512StartingDeposit: Number(
+      settings.strategyFifteenPlusX512StartingDeposit || 14
+    ),
+    strategyFifteenPlusX512NotifySeriesEnabled: Boolean(
+      settings.strategyFifteenPlusX512NotifySeriesEnabled
+    ),
+    strategyFifteenPlusX512NotifySeriesLength: Number(
+      settings.strategyFifteenPlusX512NotifySeriesLength || 13
+    ),
+    telegramConfigured: Boolean(settings.telegramChatId),
+    activeStrategy: aviatorTab ? activeStrategy : null,
     strategyState
   };
 }
@@ -334,10 +359,13 @@ async function getPopupState() {
     chrome.storage.local.get(STORAGE_KEYS.telegramStatus)
   ]);
 
+  const activeStrategy = getActiveStrategyConfig(settings);
+
   return {
     ok: true,
     version: chrome.runtime.getManifest().version,
     settings,
+    activeStrategy,
     stats,
     queues,
     collector: summarizeCollectorFrames(
@@ -347,7 +375,8 @@ async function getPopupState() {
       preparationStored[STORAGE_KEYS.preparationFrames]
     ),
     strategy: summarizeStrategyStates(
-      strategyStored[STORAGE_KEYS.strategyStates]
+      strategyStored[STORAGE_KEYS.strategyStates],
+      activeStrategy?.id || null
     ),
     telegram: telegramStored[STORAGE_KEYS.telegramStatus] || null
   };
@@ -449,30 +478,34 @@ function filterFrameStatusForOtherTabs(value, closedTabKey) {
 
 async function saveExtensionSettings(partialSettings) {
   const previous = await getSettings();
-  const requestedEnabled = Object.prototype.hasOwnProperty.call(
-    partialSettings,
-    "strategyTenPlusX340Enabled"
-  )
-    ? Boolean(partialSettings.strategyTenPlusX340Enabled)
-    : previous.strategyTenPlusX340Enabled;
-  const requestedStopStep = Object.prototype.hasOwnProperty.call(
-    partialSettings,
-    "strategyTenPlusX340StopStep"
-  )
-    ? normalizeStrategyStopStep(partialSettings.strategyTenPlusX340StopStep)
-    : previous.strategyTenPlusX340StopStep;
-  const requestedReinvestmentEnabled = Object.prototype.hasOwnProperty.call(
-    partialSettings,
-    "strategyTenPlusX340ReinvestmentEnabled"
-  )
-    ? Boolean(partialSettings.strategyTenPlusX340ReinvestmentEnabled)
-    : previous.strategyTenPlusX340ReinvestmentEnabled;
-  const criticalChangeRequested =
-    requestedEnabled !== previous.strategyTenPlusX340Enabled ||
-    requestedStopStep !== previous.strategyTenPlusX340StopStep ||
-    requestedReinvestmentEnabled !==
-      previous.strategyTenPlusX340ReinvestmentEnabled;
+  const normalizedPartial = { ...(partialSettings || {}) };
 
+  if (normalizedPartial.strategyFifteenPlusX512Enabled === true) {
+    normalizedPartial.strategyTenPlusX340Enabled = false;
+  } else if (normalizedPartial.strategyTenPlusX340Enabled === true) {
+    normalizedPartial.strategyFifteenPlusX512Enabled = false;
+  }
+
+  const requested = {
+    ...previous,
+    ...normalizedPartial,
+    strategyTenPlusX340StopStep: Object.prototype.hasOwnProperty.call(
+      normalizedPartial,
+      "strategyTenPlusX340StopStep"
+    )
+      ? normalizeStrategyStopStep(normalizedPartial.strategyTenPlusX340StopStep)
+      : previous.strategyTenPlusX340StopStep,
+    strategyFifteenPlusX512StartingDeposit: Object.prototype.hasOwnProperty.call(
+      normalizedPartial,
+      "strategyFifteenPlusX512StartingDeposit"
+    )
+      ? normalizeX512StartingDeposit(
+          normalizedPartial.strategyFifteenPlusX512StartingDeposit
+        )
+      : previous.strategyFifteenPlusX512StartingDeposit
+  };
+
+  const criticalChangeRequested = hasCriticalStrategyChange(previous, requested);
   if (criticalChangeRequested) {
     const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyStates);
     const activeState = Object.values(
@@ -489,22 +522,14 @@ async function saveExtensionSettings(partialSettings) {
       return {
         ok: false,
         error:
-          "Нельзя выключить стратегию, изменить стоп или реинвестирование во время размещённой/размещаемой ставки. " +
+          "Нельзя переключить стратегию или изменить её критические параметры во время размещённой/размещаемой ставки. " +
           "Дождитесь результата текущего шага."
       };
     }
   }
 
-  const settings = await saveSettings(partialSettings);
-  const strategyConfigurationChanged =
-    previous.strategyTenPlusX340Enabled !==
-      settings.strategyTenPlusX340Enabled ||
-    previous.strategyTenPlusX340StopStep !==
-      settings.strategyTenPlusX340StopStep ||
-    previous.strategyTenPlusX340ReinvestmentEnabled !==
-      settings.strategyTenPlusX340ReinvestmentEnabled;
-
-  if (strategyConfigurationChanged) {
+  const settings = await saveSettings(normalizedPartial);
+  if (hasCriticalStrategyChange(previous, settings)) {
     await chrome.storage.local.remove([
       STORAGE_KEYS.strategyStates,
       STORAGE_KEYS.strategyControllers
@@ -518,6 +543,18 @@ async function saveExtensionSettings(partialSettings) {
   return { ok: true, settings };
 }
 
+function hasCriticalStrategyChange(left, right) {
+  const keys = [
+    "strategyTenPlusX340Enabled",
+    "strategyTenPlusX340StopStep",
+    "strategyTenPlusX340ReinvestmentEnabled",
+    "strategyFifteenPlusX512Enabled",
+    "strategyFifteenPlusX512ReinvestmentEnabled",
+    "strategyFifteenPlusX512StartingDeposit"
+  ];
+  return keys.some((key) => left?.[key] !== right?.[key]);
+}
+
 
 async function claimStrategyController(sender, message) {
   const settings = await getSettings();
@@ -528,7 +565,7 @@ async function claimStrategyController(sender, message) {
     tabId === null ||
     tabId === undefined ||
     !isAviatorTabUrl(topUrl) ||
-    !settings.strategyTenPlusX340Enabled
+    !getActiveStrategyConfig(settings)
   ) {
     return { ok: true, owner: false, reason: "strategy-unavailable" };
   }
@@ -748,13 +785,14 @@ function withStrategyControllerLock(tabId, task) {
 
 async function sendStrategyNotification(sender, message) {
   const settings = await getSettings();
+  const activeStrategy = getActiveStrategyConfig(settings);
   const topUrl = sender.tab?.url || message.pageUrl || "";
 
   if (!isAviatorTabUrl(topUrl)) {
     return { ok: false, error: "Уведомление разрешено только из вкладки Aviator" };
   }
 
-  if (!settings.strategyTenPlusX340Enabled) {
+  if (!activeStrategy) {
     return { ok: false, error: "Стратегия выключена" };
   }
 
@@ -767,10 +805,14 @@ async function sendStrategyNotification(sender, message) {
     return { ok: false, error: "Telegram ID не указан" };
   }
 
-  const notification = sanitizeStrategyNotification(message.notification, settings);
+  const notification = sanitizeStrategyNotification(
+    message.notification,
+    settings,
+    activeStrategy
+  );
   if (
     notification.reason === "series" &&
-    !settings.strategyTenPlusX340NotifySeriesEnabled
+    !activeStrategy.notifySeriesEnabled
   ) {
     return { ok: false, error: "Уведомления о серии выключены" };
   }
@@ -792,6 +834,7 @@ async function sendStrategyNotification(sender, message) {
   const statusBase = {
     reason: notification.reason,
     notificationKey,
+    strategyId: activeStrategy.id,
     observedAt: new Date().toISOString()
   };
   await chrome.storage.local.set({
@@ -828,7 +871,7 @@ async function sendStrategyNotification(sender, message) {
   }
 }
 
-function sanitizeStrategyNotification(value, settings) {
+function sanitizeStrategyNotification(value, settings, activeStrategy) {
   const source = value && typeof value === "object" ? value : {};
   const reason = ["series", "profit", "stop"].includes(source.reason)
     ? source.reason
@@ -845,14 +888,14 @@ function sanitizeStrategyNotification(value, settings) {
   const payload = {
     chat_id: settings.telegramChatId,
     reason,
-    strategy_name: "10+ - x3.40",
-    target: 3.40,
-    signal_length: 10
+    strategy_name: activeStrategy.name,
+    target: activeStrategy.target,
+    signal_length: activeStrategy.signalLength
   };
 
   if (reason === "series") {
     payload.series_length = Math.min(
-      10,
+      activeStrategy.signalLength,
       Math.max(1, Math.round(number(source.seriesLength, 1)))
     );
     payload.current_streak = Math.max(
@@ -884,7 +927,11 @@ async function getStrategyState(sender, message) {
   };
 }
 
-async function getStrategyStateForTab(tabId, topUrl = "") {
+async function getStrategyStateForTab(
+  tabId,
+  topUrl = "",
+  expectedStrategyId = null
+) {
   if (tabId === null || tabId === undefined) {
     return null;
   }
@@ -893,6 +940,10 @@ async function getStrategyStateForTab(tabId, topUrl = "") {
   const states = cleanStrategyStates(stored[STORAGE_KEYS.strategyStates]);
   const state = states[String(tabId)] || null;
   if (!state) {
+    return null;
+  }
+
+  if (expectedStrategyId && state.strategyId !== expectedStrategyId) {
     return null;
   }
 
@@ -911,7 +962,8 @@ async function saveStrategyState(sender, message) {
     return { ok: true, ignored: true };
   }
 
-  if (!settings.strategyTenPlusX340Enabled) {
+  const activeStrategy = getActiveStrategyConfig(settings);
+  if (!activeStrategy) {
     return { ok: true, ignored: true, reason: "strategy-disabled" };
   }
 
@@ -928,12 +980,16 @@ async function saveStrategyState(sender, message) {
 
     const stored = await chrome.storage.local.get(STORAGE_KEYS.strategyStates);
     const states = cleanStrategyStates(stored[STORAGE_KEYS.strategyStates]);
-    const state = sanitizeStrategyState(message.state, {
-      tabId,
-      frameId: sender.frameId ?? 0,
-      topUrl,
-      frameUrl: sender.url || message.frameUrl || ""
-    });
+    const state = sanitizeStrategyState(
+      message.state,
+      {
+        tabId,
+        frameId: sender.frameId ?? 0,
+        topUrl,
+        frameUrl: sender.url || message.frameUrl || ""
+      },
+      activeStrategy
+    );
 
     states[String(tabId)] = state;
     await chrome.storage.local.set({ [STORAGE_KEYS.strategyStates]: states });
@@ -953,7 +1009,7 @@ function cleanStrategyStates(value) {
       Number.isFinite(observedAt) &&
       now - observedAt < STRATEGY_STATE_TTL_MS &&
       state?.version === 3 &&
-      state?.strategyId === STRATEGY_ID
+      isKnownStrategyId(state?.strategyId)
     ) {
       cleaned[key] = state;
     }
@@ -962,7 +1018,7 @@ function cleanStrategyStates(value) {
   return cleaned;
 }
 
-function sanitizeStrategyState(value, context) {
+function sanitizeStrategyState(value, context, activeStrategy) {
   const state = value && typeof value === "object" ? value : {};
   const number = (candidate, fallback = 0) => {
     const parsed = Number(candidate);
@@ -973,6 +1029,15 @@ function sanitizeStrategyState(value, context) {
     0,
     Number(number(state.minimumDeposit, 0).toFixed(4))
   );
+  const startingDeposit = Math.max(
+    minimumDeposit,
+    Number(
+      number(
+        state.startingDeposit,
+        activeStrategy.startingDeposit || minimumDeposit
+      ).toFixed(4)
+    )
+  );
   const reinvestmentStep = Math.max(
     0,
     Number(number(state.reinvestmentStep, 0).toFixed(4))
@@ -982,19 +1047,27 @@ function sanitizeStrategyState(value, context) {
     Number(number(state.cycleInitialBet, 0.2).toFixed(2))
   );
 
+  const strategyId = isKnownStrategyId(state.strategyId)
+    ? String(state.strategyId)
+    : activeStrategy.id;
+  if (strategyId !== activeStrategy.id) {
+    throw new Error("Состояние относится к другой стратегии");
+  }
+
   return {
     version: 3,
-    strategyId: STRATEGY_ID,
+    strategyId,
     stage: String(state.stage || "waiting").slice(0, 64),
     initialized: Boolean(state.initialized),
     consecutiveLosses: Math.max(0, Math.round(number(state.consecutiveLosses))),
     step: Math.max(0, Math.round(number(state.step))),
     cumulativeLoss: Math.max(0, Number(number(state.cumulativeLoss).toFixed(2))),
     minimumDeposit,
+    startingDeposit,
     reinvestmentStep,
     strategyBalance: Math.max(
       0,
-      Number(number(state.strategyBalance, minimumDeposit).toFixed(4))
+      Number(number(state.strategyBalance, startingDeposit).toFixed(4))
     ),
     cycleInitialBet,
     cycleTargetProfit: Math.max(
@@ -1055,8 +1128,10 @@ function sanitizeStrategyState(value, context) {
   };
 }
 
-function summarizeStrategyStates(value) {
-  const states = Object.values(cleanStrategyStates(value)).sort(
+function summarizeStrategyStates(value, expectedStrategyId = null) {
+  const states = Object.values(cleanStrategyStates(value))
+    .filter((state) => !expectedStrategyId || state.strategyId === expectedStrategyId)
+    .sort(
     (left, right) =>
       Date.parse(right?.observedAt || "") - Date.parse(left?.observedAt || "")
   );

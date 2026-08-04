@@ -15,7 +15,12 @@ export const DEFAULT_SETTINGS = Object.freeze({
   strategyTenPlusX340StopStep: 12,
   strategyTenPlusX340ReinvestmentEnabled: false,
   strategyTenPlusX340NotifySeriesEnabled: false,
-  strategyTenPlusX340NotifySeriesLength: 8
+  strategyTenPlusX340NotifySeriesLength: 8,
+  strategyFifteenPlusX512Enabled: false,
+  strategyFifteenPlusX512ReinvestmentEnabled: false,
+  strategyFifteenPlusX512StartingDeposit: 14,
+  strategyFifteenPlusX512NotifySeriesEnabled: false,
+  strategyFifteenPlusX512NotifySeriesLength: 13
 });
 
 export const STORAGE_KEYS = Object.freeze({

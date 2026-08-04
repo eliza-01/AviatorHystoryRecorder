@@ -8,14 +8,14 @@ function delay(ms = 25) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function makeSnapshot(lossCount, prefix = 'r') {
+function makeSnapshot(lossCount, prefix = 'r', resetMultiplier = 5.0) {
   const values = [];
   const ids = [];
   for (let n = lossCount; n >= 1; n -= 1) {
     values.push(1.5);
     ids.push(`${prefix}${n}`);
   }
-  values.push(5.0);
+  values.push(resetMultiplier);
   ids.push(`${prefix}0`);
   return {
     values,
@@ -31,7 +31,14 @@ async function createRuntime({
   owner = true,
   notifyLength = 8,
   reinvestmentEnabled = false,
-  stopStep = 12
+  stopStep = 12,
+  strategyId = 'ten-plus-x340',
+  strategyName = '10+ - x3.40',
+  target = 3.40,
+  signalLength = 10,
+  pauseAt = 8,
+  minimumDeposit = null,
+  startingDeposit = null
 } = {}) {
   const listeners = new Map();
   const storageChangeListeners = [];
@@ -44,7 +51,14 @@ async function createRuntime({
     reinvestmentEnabled,
     telegramConfigured: true,
     notifySeriesEnabled: true,
-    notifySeriesLength: notifyLength
+    notifySeriesLength: notifyLength,
+    strategyId,
+    strategyName,
+    target,
+    signalLength,
+    pauseAt,
+    minimumDeposit,
+    startingDeposit
   };
 
   const window = {
@@ -107,12 +121,22 @@ async function createRuntime({
           case 'GET_CAPTURE_STATE':
             return {
               ok: true,
-              strategyTenPlusX340Enabled: runtimeSettings.enabled,
-              strategyTenPlusX340StopStep: runtimeSettings.stopStep,
-              strategyTenPlusX340ReinvestmentEnabled: runtimeSettings.reinvestmentEnabled,
               telegramConfigured: runtimeSettings.telegramConfigured,
-              strategyTenPlusX340NotifySeriesEnabled: runtimeSettings.notifySeriesEnabled,
-              strategyTenPlusX340NotifySeriesLength: runtimeSettings.notifySeriesLength,
+              activeStrategy: runtimeSettings.enabled
+                ? {
+                    id: runtimeSettings.strategyId,
+                    name: runtimeSettings.strategyName,
+                    target: runtimeSettings.target,
+                    signalLength: runtimeSettings.signalLength,
+                    pauseAt: runtimeSettings.pauseAt,
+                    stopStep: runtimeSettings.stopStep,
+                    minimumDeposit: runtimeSettings.minimumDeposit,
+                    startingDeposit: runtimeSettings.startingDeposit,
+                    reinvestmentEnabled: runtimeSettings.reinvestmentEnabled,
+                    notifySeriesEnabled: runtimeSettings.notifySeriesEnabled,
+                    notifySeriesLength: runtimeSettings.notifySeriesLength
+                  }
+                : null,
               strategyState: savedState
             };
           case 'CLAIM_STRATEGY_CONTROLLER':
@@ -330,6 +354,112 @@ async function createRuntime({
   assert.strictEqual(retrospective.getState().stage, 'waiting');
   assert.strictEqual(retrospective.getState().consecutiveLosses, 0);
   assert.strictEqual(retrospective.getState().autoReloadPaused, false);
+
+
+
+  const x512 = await createRuntime({
+    strategyId: 'fifteen-plus-x512',
+    strategyName: '15+ - x5.12',
+    target: 5.12,
+    signalLength: 15,
+    pauseAt: 13,
+    stopStep: 16,
+    minimumDeposit: 14,
+    startingDeposit: 28,
+    notifyLength: 13
+  });
+  await x512.snapshot(makeSnapshot(12, 'n', 6.0));
+  assert.strictEqual(x512.actions.length, 0, '12/15 must not prepare');
+  assert.strictEqual(x512.getState().minimumDeposit, 14);
+  assert.strictEqual(x512.getState().startingDeposit, 28);
+  assert.strictEqual(x512.getState().strategyBalance, 28);
+
+  await x512.snapshot(makeSnapshot(13, 'n', 6.0));
+  assert.deepStrictEqual(x512.actions.map((item) => item.type), ['PREPARE']);
+  assert.strictEqual(x512.actions.at(-1).settings.bet, 0.20);
+  assert.strictEqual(x512.actions.at(-1).settings.cashout, 5.12);
+
+  await x512.snapshot(makeSnapshot(14, 'n', 6.0));
+  assert.deepStrictEqual(x512.actions.map((item) => item.type), ['PREPARE']);
+
+  await x512.snapshot(makeSnapshot(15, 'n', 6.0));
+  assert.deepStrictEqual(
+    x512.actions.map((item) => item.type),
+    ['PREPARE', 'PREPARE_AND_BET']
+  );
+  assert.strictEqual(x512.getState().strategyId, 'fifteen-plus-x512');
+  assert.strictEqual(
+    x512.getState().configSignature,
+    'fifteen-plus-x512|16|0|28|deposit-v2'
+  );
+  assert.strictEqual(x512.getState().awaitingResult, true);
+
+  const x512Win = makeSnapshot(15, 'n', 6.0);
+  x512Win.values.unshift(6.2);
+  x512Win.ids.unshift('n16');
+  await x512.snapshot(x512Win);
+  assert.strictEqual(x512.getState().completedCycles, 1);
+  assert.strictEqual(x512.getState().strategyBalance, 28.824);
+
+
+
+  const x512Progression = await createRuntime({
+    strategyId: 'fifteen-plus-x512',
+    strategyName: '15+ - x5.12',
+    target: 5.12,
+    signalLength: 15,
+    pauseAt: 13,
+    stopStep: 16,
+    minimumDeposit: 14,
+    startingDeposit: 14,
+    notifyLength: 13
+  });
+  await x512Progression.snapshot(makeSnapshot(14, 'q', 6.0));
+  await x512Progression.snapshot(makeSnapshot(15, 'q', 6.0));
+  const x512Losses = makeSnapshot(15, 'q', 6.0);
+  for (let lossNumber = 1; lossNumber <= 16; lossNumber += 1) {
+    x512Losses.values.unshift(1.2);
+    x512Losses.ids.unshift(`q${15 + lossNumber}`);
+    await x512Progression.snapshot(x512Losses);
+  }
+  const x512PlacedBets = x512Progression.actions
+    .filter((item) => item.type === 'PREPARE_AND_BET')
+    .map((item) => item.settings.bet);
+  assert.deepStrictEqual(x512PlacedBets, [
+    0.20, 0.20, 0.20, 0.20, 0.25, 0.31, 0.38, 0.48,
+    0.59, 0.74, 0.92, 1.14, 1.42, 1.76, 2.19, 2.72
+  ]);
+  assert.strictEqual(x512Progression.getState().stoppedCycles, 1);
+  assert.strictEqual(x512Progression.getState().strategyBalance, 0.30);
+  assert.strictEqual(x512Progression.getState().minimumDeposit, 14);
+
+  const x512Reinvestment = await createRuntime({
+    strategyId: 'fifteen-plus-x512',
+    strategyName: '15+ - x5.12',
+    target: 5.12,
+    signalLength: 15,
+    pauseAt: 13,
+    stopStep: 16,
+    minimumDeposit: 14,
+    startingDeposit: 28,
+    notifyLength: 13,
+    reinvestmentEnabled: true,
+    initialState: {
+      version: 3,
+      strategyId: 'fifteen-plus-x512',
+      configSignature: 'fifteen-plus-x512|16|1|28|deposit-v2',
+      initialized: true,
+      stage: 'waiting',
+      consecutiveLosses: 0,
+      minimumDeposit: 14,
+      startingDeposit: 28,
+      reinvestmentStep: 0.7,
+      strategyBalance: 28.7,
+      lastProcessedRoundId: 'qr0'
+    }
+  });
+  await x512Reinvestment.snapshot(makeSnapshot(13, 'qr', 6.0));
+  assert.strictEqual(x512Reinvestment.actions.at(-1).settings.bet, 0.21);
 
   const nonOwner = await createRuntime({ owner: false });
   await nonOwner.snapshot(makeSnapshot(10, 'z'));

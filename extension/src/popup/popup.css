@@ -499,3 +499,130 @@ button.secondary {
   margin: 6px 0 12px;
   line-height: 1.35;
 }
+
+.strategies-heading-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.strategies-heading-row small {
+  color: #7f8792;
+  font-size: 10px;
+}
+
+.strategy-card {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+}
+
+.strategy-card-recommended {
+  border-color: rgba(105, 231, 154, 0.48);
+}
+
+.strategy-card-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 0 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.strategy-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.strategy-card-summary::before {
+  content: "›";
+  flex: 0 0 auto;
+  color: #7f8792;
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+
+.strategy-card[open] > .strategy-card-summary::before {
+  transform: rotate(90deg);
+}
+
+.strategy-card-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-right: auto;
+  font-weight: 700;
+}
+
+.strategy-recommended-badge {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(105, 231, 154, 0.14);
+  color: #69e79a;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.strategy-summary-toggle {
+  z-index: 1;
+}
+
+.strategy-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+  border-top: 1px solid #343a43;
+}
+
+.strategy-card-body > :first-child {
+  margin-top: 11px;
+}
+
+.strategy-card-body .switch-row,
+.strategy-card-body .field {
+  margin-bottom: 0;
+}
+
+.strategy-card-body > small {
+  color: #7f8792;
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.strategy-card-body > small.ok {
+  color: #69e79a;
+}
+
+.strategy-card-body > small.error {
+  color: #ff8585;
+}
+
+.strategy-deposit-field span {
+  color: #aeb5bf;
+  font-size: 11px;
+}
+
+.strategy-fixed-details {
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  border: 1px solid #343a43;
+  border-radius: 7px;
+  background: #191c20;
+  color: #7f8792;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.strategy-fixed-details strong {
+  color: #aeb5bf;
+  font-size: 11px;
+}

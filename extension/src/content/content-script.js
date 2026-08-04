@@ -19,7 +19,7 @@
   const MAX_BADGE_OPACITY_PERCENT = 100;
   const BADGE_VERTICAL_GAP_PX = 6;
   const BADGE_FALLBACK_HEIGHT_PX = 38;
-  const STRATEGY_TARGET = 3.40;
+  const DEFAULT_STRATEGY_TARGET = 3.40;
   const STRATEGY_INITIAL_BET = 0.20;
   const STRATEGY_BET_STEP = 0.01;
   const STRATEGY_HISTORY_CHANNEL = "aviator-strategy-history-v1";
@@ -53,6 +53,7 @@
   let pageAutoReloadBadgeKeyboardHandler = null;
   let pageAutoReloadSuspendedByStrategy = false;
   let strategyEnabled = false;
+  let activeStrategyConfig = null;
   let strategyStopStep = 12;
   let strategyReinvestmentEnabled = false;
   let strategyRuntimeState = null;
@@ -137,9 +138,14 @@
       MAX_BADGE_OPACITY_PERCENT,
       100
     );
-    strategyStopStep = Math.max(0, Number(response?.strategyTenPlusX340StopStep || 0));
+    activeStrategyConfig = response?.activeStrategy || null;
+    strategyStopStep = Math.max(
+      0,
+      Number(activeStrategyConfig?.stopStep || response?.strategyTenPlusX340StopStep || 0)
+    );
     strategyReinvestmentEnabled = Boolean(
-      response?.strategyTenPlusX340ReinvestmentEnabled
+      activeStrategyConfig?.reinvestmentEnabled ??
+        response?.strategyTenPlusX340ReinvestmentEnabled
     );
     applyBadgeLayout();
   }
@@ -190,7 +196,7 @@
 
       const previousSuspended = pageAutoReloadSuspendedByStrategy;
       applyCaptureSettings(response);
-      strategyEnabled = Boolean(response.strategyTenPlusX340Enabled);
+      strategyEnabled = Boolean(response.activeStrategy);
       strategyRuntimeState = response.strategyState || null;
       pageAutoReloadSuspendedByStrategy = Boolean(
         strategyEnabled && strategyRuntimeState?.autoReloadPaused
@@ -233,7 +239,7 @@
         60
       );
       pageAutoReloadEnabled = Boolean(response.pageAutoReloadEnabled);
-      strategyEnabled = Boolean(response.strategyTenPlusX340Enabled);
+      strategyEnabled = Boolean(response.activeStrategy);
       strategyRuntimeState = response.strategyState || null;
       pageAutoReloadSuspendedByStrategy = Boolean(
         strategyEnabled && strategyRuntimeState?.autoReloadPaused
@@ -605,24 +611,29 @@
 
     const state = strategyRuntimeState || {};
     const streak = Math.max(0, Number(state.consecutiveLosses || 0));
-    const progress = Math.max(0, Math.min(1, streak / 10));
+    const signalLength = Math.max(
+      1,
+      Number(activeStrategyConfig?.signalLength || 10)
+    );
+    const strategyName = String(activeStrategyConfig?.name || "10+ - x3.40");
+    const progress = Math.max(0, Math.min(1, streak / signalLength));
     const stage = String(state.stage || "waiting");
 
     if (stage === "error") {
-      strategyBadgeText.textContent = `10+ - x3.40 · ошибка: ${
+      strategyBadgeText.textContent = `${strategyName} · ошибка: ${
         state.error || "проверьте интерфейс"
       }`;
     } else if (state.awaitingResult) {
       strategyBadgeText.textContent =
-        `10+ - x3.40 · шаг ${state.step || 1} · ставка ${formatBadgeNumber(
+        `${strategyName} · шаг ${state.step || 1} · ставка ${formatBadgeNumber(
           state.activeBet || state.nextBet || 0.2
         )} · ждём результат`;
     } else if (["preparing", "arming", "betting", "waiting-reset"].includes(stage)) {
       strategyBadgeText.textContent =
-        `10+ - x3.40 · ${state.message || "подготовка ставки"}`;
+        `${strategyName} · ${state.message || "подготовка ставки"}`;
     } else {
       strategyBadgeText.textContent =
-        `10+ - x3.40 · серия ${Math.min(streak, 10)}/10`;
+        `${strategyName} · серия ${Math.min(streak, signalLength)}/${signalLength}`;
     }
 
     strategyBadgeProgress.style.transform = `scaleX(${progress.toFixed(4)})`;
@@ -732,20 +743,31 @@
     }
 
     const state = strategyRuntimeState || {};
-    const calculatedMinimum = calculateMinimumStartingDeposit(strategyStopStep);
+    const calculatedMinimum = calculateMinimumStartingDeposit(
+      strategyStopStep,
+      Number(activeStrategyConfig?.target || DEFAULT_STRATEGY_TARGET)
+    );
     const stateMinimum = Number(state.minimumDeposit);
     const minimumDeposit = Number.isFinite(stateMinimum) && stateMinimum > 0
       ? stateMinimum
       : calculatedMinimum;
+    const configuredStartingDeposit = Number(activeStrategyConfig?.startingDeposit);
+    const stateStartingDeposit = Number(state.startingDeposit);
+    const startingDeposit =
+      Number.isFinite(stateStartingDeposit) && stateStartingDeposit > 0
+        ? stateStartingDeposit
+        : Number.isFinite(configuredStartingDeposit) && configuredStartingDeposit > 0
+          ? configuredStartingDeposit
+          : minimumDeposit;
     const stateBalance = Number(state.strategyBalance);
     const currentBalance = Number.isFinite(stateBalance) && stateBalance >= 0
       ? stateBalance
-      : minimumDeposit;
+      : startingDeposit;
     const reinvestmentMarker = strategyReinvestmentEnabled ? "✅" : "❌";
 
     balanceBadgeText.textContent =
-      `🏁 ${formatOptionalBadgeNumber(minimumDeposit)} ` +
       `💰 ${formatOptionalBadgeNumber(currentBalance)} ` +
+      `🏁 ${formatOptionalBadgeNumber(startingDeposit)} ` +
       `${reinvestmentMarker} Реинвест`;
     applyBadgeLayout();
   }
@@ -820,7 +842,10 @@
     balanceBadgeText = null;
   }
 
-  function calculateMinimumStartingDeposit(stopStep) {
+  function calculateMinimumStartingDeposit(
+    stopStep,
+    target = DEFAULT_STRATEGY_TARGET
+  ) {
     const normalizedStop = Math.max(0, Math.round(Number(stopStep) || 0));
     if (normalizedStop <= 0) {
       return 0;
@@ -832,7 +857,7 @@
       cumulativeLoss = roundBadgeMoney(cumulativeLoss + bet);
       if (step < normalizedStop) {
         const raw =
-          (cumulativeLoss + STRATEGY_INITIAL_BET) / (STRATEGY_TARGET - 1);
+          (cumulativeLoss + STRATEGY_INITIAL_BET) / (target - 1);
         bet = Math.max(
           STRATEGY_INITIAL_BET,
           ceilBadgeToStep(raw, STRATEGY_BET_STEP)
@@ -856,6 +881,7 @@
     strategyBadgeText = null;
     strategyBadgeProgress = null;
     strategyRuntimeState = null;
+    activeStrategyConfig = null;
     pageAutoReloadSuspendedByStrategy = false;
   }
 

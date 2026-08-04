@@ -105,6 +105,15 @@ function findByClass(node, className) {
     strategyTenPlusX340Enabled: true,
     strategyTenPlusX340StopStep: 12,
     strategyTenPlusX340ReinvestmentEnabled: true,
+    activeStrategy: {
+      id: 'ten-plus-x340',
+      name: '10+ - x3.40',
+      target: 3.40,
+      signalLength: 10,
+      stopStep: 12,
+      startingDeposit: null,
+      reinvestmentEnabled: true
+    },
     strategyState: {
       stage: 'waiting',
       consecutiveLosses: 3,
@@ -179,6 +188,7 @@ function findByClass(node, className) {
   );
 
   captureState.strategyTenPlusX340ReinvestmentEnabled = false;
+  captureState.activeStrategy.reinvestmentEnabled = false;
   captureState.strategyState.strategyBalance = 19.6;
   assert.ok(storageChangedListener, 'storage listener should be registered');
   storageChangedListener({ settings: { newValue: {} } }, 'local');

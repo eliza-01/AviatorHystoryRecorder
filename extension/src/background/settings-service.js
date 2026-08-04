@@ -7,11 +7,12 @@ const MAX_PREPARATION_BET = 999_999_999;
 const MIN_PREPARATION_CASHOUT = 1.01;
 const MAX_PREPARATION_CASHOUT = 1_000_000;
 const MAX_STRATEGY_STOP_STEP = 100;
-const MAX_STRATEGY_SERIES_LENGTH = 10;
 const MIN_BADGE_OFFSET_PX = 0;
 const MAX_BADGE_OFFSET_PX = 10_000;
 const MIN_BADGE_OPACITY_PERCENT = 10;
 const MAX_BADGE_OPACITY_PERCENT = 100;
+const X512_MINIMUM_DEPOSIT = 14;
+const X512_MAXIMUM_DEPOSIT = 1_400_000;
 
 export async function getSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.settings);
@@ -89,18 +90,21 @@ export function normalizeTelegramChatId(value) {
   return /^\d{1,20}$/.test(numeric) ? normalized : "";
 }
 
-export function normalizeStrategySeriesLength(value) {
+export function normalizeStrategySeriesLength(
+  value,
+  maximum = 10,
+  fallback = 8
+) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
-    return DEFAULT_SETTINGS.strategyTenPlusX340NotifySeriesLength;
+    return fallback;
   }
 
   return Math.min(
-    MAX_STRATEGY_SERIES_LENGTH,
+    Math.max(1, Math.round(maximum)),
     Math.max(1, Math.round(parsed))
   );
 }
-
 
 export function normalizeBadgeOffsetPx(value, fallback = 10) {
   const parsed = Number(value);
@@ -135,6 +139,21 @@ export function normalizeStrategyStopStep(value) {
   return Math.min(MAX_STRATEGY_STOP_STEP, Math.max(1, Math.round(parsed)));
 }
 
+export function normalizeX512StartingDeposit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SETTINGS.strategyFifteenPlusX512StartingDeposit;
+  }
+
+  const bounded = Math.min(
+    X512_MAXIMUM_DEPOSIT,
+    Math.max(X512_MINIMUM_DEPOSIT, parsed)
+  );
+
+  // Округляем вверх, чтобы введённое значение никогда не уменьшало запас банка.
+  return Math.ceil(bounded / X512_MINIMUM_DEPOSIT) * X512_MINIMUM_DEPOSIT;
+}
+
 function sanitizeSettings(value) {
   const settings = {
     ...DEFAULT_SETTINGS,
@@ -160,6 +179,7 @@ function sanitizeSettings(value) {
     settings.badgeOpacityPercent
   );
   settings.telegramChatId = normalizeTelegramChatId(settings.telegramChatId);
+
   settings.strategyTenPlusX340Enabled = Boolean(
     settings.strategyTenPlusX340Enabled
   );
@@ -177,8 +197,39 @@ function sanitizeSettings(value) {
   );
   settings.strategyTenPlusX340NotifySeriesLength =
     normalizeStrategySeriesLength(
-      settings.strategyTenPlusX340NotifySeriesLength
+      settings.strategyTenPlusX340NotifySeriesLength,
+      10,
+      DEFAULT_SETTINGS.strategyTenPlusX340NotifySeriesLength
     );
+
+  settings.strategyFifteenPlusX512Enabled = Boolean(
+    settings.strategyFifteenPlusX512Enabled
+  );
+  settings.strategyFifteenPlusX512ReinvestmentEnabled = Boolean(
+    settings.strategyFifteenPlusX512ReinvestmentEnabled
+  );
+  settings.strategyFifteenPlusX512StartingDeposit = normalizeX512StartingDeposit(
+    settings.strategyFifteenPlusX512StartingDeposit
+  );
+  settings.strategyFifteenPlusX512NotifySeriesEnabled = Boolean(
+    settings.strategyFifteenPlusX512NotifySeriesEnabled
+  );
+  settings.strategyFifteenPlusX512NotifySeriesLength =
+    normalizeStrategySeriesLength(
+      settings.strategyFifteenPlusX512NotifySeriesLength,
+      15,
+      DEFAULT_SETTINGS.strategyFifteenPlusX512NotifySeriesLength
+    );
+
+  // Одновременно интерфейсом ставки может управлять только одна стратегия.
+  // При конфликте приоритет получает новая рекомендованная стратегия.
+  if (
+    settings.strategyFifteenPlusX512Enabled &&
+    settings.strategyTenPlusX340Enabled
+  ) {
+    settings.strategyTenPlusX340Enabled = false;
+  }
+
   settings.preparationEnabled = Boolean(settings.preparationEnabled);
   settings.preparationBet = normalizePreparationBet(settings.preparationBet);
   settings.preparationCashout = normalizePreparationCashout(
@@ -192,8 +243,10 @@ function sanitizeSettings(value) {
   delete settings.strategyTenPlusX348NotifySeriesEnabled;
   delete settings.strategyTenPlusX348NotifySeriesLength;
 
-  // Активная стратегия полностью управляет первым блоком ставки.
-  if (settings.strategyTenPlusX340Enabled) {
+  if (
+    settings.strategyTenPlusX340Enabled ||
+    settings.strategyFifteenPlusX512Enabled
+  ) {
     settings.preparationEnabled = false;
   }
 
@@ -203,9 +256,6 @@ function sanitizeSettings(value) {
 function migrateLegacyStrategySettings(value) {
   const settings = { ...(value || {}) };
 
-  // Переносим только безопасные пользовательские настройки. Стоп новой
-  // стратегии намеренно получает рекомендованное значение 12, а старое
-  // состояние x3.48 не продолжается под новым множителем.
   if (
     !Object.prototype.hasOwnProperty.call(settings, "strategyTenPlusX340Enabled") &&
     Object.prototype.hasOwnProperty.call(settings, "strategyTenPlusX348Enabled")
