@@ -908,6 +908,12 @@ function sanitizeStrategyNotification(value, settings, activeStrategy) {
     payload.profit = Math.max(0, number(source.profit));
     payload.multiplier = Math.max(0, number(source.multiplier));
     payload.bet = Math.max(0, number(source.bet));
+    payload.starting_deposit = Math.max(
+      0,
+      number(source.startingDeposit, activeStrategy.startingDeposit || 0)
+    );
+    payload.started_at = sanitizeIsoTimestamp(source.startedAt);
+    payload.total_profit = number(source.totalProfit);
   } else {
     payload.step = Math.max(1, Math.round(number(source.step, 1)));
     payload.drawdown = Math.max(0, number(source.drawdown));
@@ -1069,6 +1075,7 @@ function sanitizeStrategyState(value, context, activeStrategy) {
       0,
       Number(number(state.strategyBalance, startingDeposit).toFixed(4))
     ),
+    startedAt: sanitizeIsoTimestamp(state.startedAt),
     cycleInitialBet,
     cycleTargetProfit: Math.max(
       cycleInitialBet,
@@ -1201,6 +1208,14 @@ function summarizeCollectorFrames(value) {
     frameUrl: best?.frameUrl || null,
     observedAt: best?.observedAt || null
   };
+}
+
+function sanitizeIsoTimestamp(value, fallback = new Date().toISOString()) {
+  const parsed = Date.parse(String(value || ""));
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return new Date(parsed).toISOString();
 }
 
 function sanitizeStatusUrl(value) {

@@ -400,6 +400,16 @@ async function createRuntime({
   await x512.snapshot(x512Win);
   assert.strictEqual(x512.getState().completedCycles, 1);
   assert.strictEqual(x512.getState().strategyBalance, 28.824);
+  assert.ok(Number.isFinite(Date.parse(x512.getState().startedAt)));
+  const x512ProfitNotification = x512.notifications.find(
+    (item) => item.notification.reason === 'profit'
+  );
+  assert.ok(x512ProfitNotification, 'profit notification must be queued');
+  assert.strictEqual(x512ProfitNotification.notification.startingDeposit, 28);
+  assert.strictEqual(x512ProfitNotification.notification.totalProfit, 0.824);
+  assert.ok(Number.isFinite(
+    Date.parse(x512ProfitNotification.notification.startedAt)
+  ));
 
 
 

@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -23,6 +24,13 @@ class TelegramStrategyNotificationRequest(BaseModel):
     loss: float | None = Field(default=None, ge=0, le=1_000_000_000)
     multiplier: float | None = Field(default=None, ge=0, le=1_000_000)
     bet: float | None = Field(default=None, ge=0, le=1_000_000_000)
+    starting_deposit: float | None = Field(default=None, ge=0, le=1_000_000_000)
+    started_at: datetime | None = None
+    total_profit: float | None = Field(
+        default=None,
+        ge=-1_000_000_000,
+        le=1_000_000_000,
+    )
 
     @field_validator("chat_id")
     @classmethod

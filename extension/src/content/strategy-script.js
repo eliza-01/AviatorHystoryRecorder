@@ -655,13 +655,6 @@
     const pnl = Number(
       (activeBet * (strategyTarget() - 1) - state.cumulativeLoss).toFixed(4)
     );
-    const notification = {
-      step: completedStep,
-      drawdown,
-      profit: Math.max(0, pnl),
-      multiplier: Number(multiplier),
-      bet: activeBet
-    };
 
     state.completedCycles += 1;
     state.lastCyclePnl = pnl;
@@ -673,6 +666,18 @@
         ) + pnl
       )
     );
+    state.startedAt = normalizeIsoTimestamp(state.startedAt);
+    const startingDeposit = calculateConfiguredStartingDeposit();
+    const notification = {
+      step: completedStep,
+      drawdown,
+      profit: Math.max(0, pnl),
+      multiplier: Number(multiplier),
+      bet: activeBet,
+      startingDeposit,
+      startedAt: state.startedAt,
+      totalProfit: roundToFour(state.strategyBalance - startingDeposit)
+    };
     state.stage = "waiting";
     state.consecutiveLosses = 0;
     state.step = 0;
@@ -1002,6 +1007,7 @@
       startingDeposit,
       reinvestmentStep,
       strategyBalance: startingDeposit,
+      startedAt: new Date().toISOString(),
       cycleInitialBet: INITIAL_BET,
       cycleTargetProfit: MIN_PROFIT,
       nextBet: INITIAL_BET,
@@ -1041,6 +1047,7 @@
         0,
         Number(source.strategyBalance ?? initial.startingDeposit)
       ),
+      startedAt: normalizeIsoTimestamp(source.startedAt, initial.startedAt),
       cycleInitialBet: Math.max(
         INITIAL_BET,
         Number(source.cycleInitialBet || INITIAL_BET)
@@ -1303,6 +1310,14 @@
 
   function roundToFour(value) {
     return Number(Number(value).toFixed(4));
+  }
+
+  function normalizeIsoTimestamp(value, fallback = new Date().toISOString()) {
+    const parsed = Date.parse(String(value || ""));
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+    return new Date(parsed).toISOString();
   }
 
   function createRequestId(prefix) {

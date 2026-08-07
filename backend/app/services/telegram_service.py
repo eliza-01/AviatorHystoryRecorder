@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime, timezone
 from html import escape
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -15,6 +16,68 @@ from app.schemas.telegram_notification import (
 
 def _format_number(value: float, digits: int = 2) -> str:
     return f"{float(value):.{digits}f}"
+
+
+def _format_compact_number(value: float, digits: int = 1) -> str:
+    formatted = f"{float(value):.{digits}f}"
+    return formatted.rstrip("0").rstrip(".")
+
+
+def _format_elapsed(started_at: datetime, now: datetime) -> str:
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    else:
+        started_at = started_at.astimezone(timezone.utc)
+
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+
+    total_minutes = max(0, int((now - started_at).total_seconds() // 60))
+    days, remainder = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(remainder, 60)
+
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}д")
+    if hours or days:
+        parts.append(f"{hours}ч")
+    parts.append(f"{minutes}м")
+    return " ".join(parts)
+
+
+def _format_profit_summary(
+    payload: TelegramStrategyNotificationRequest,
+    now: datetime | None = None,
+) -> str:
+    if (
+        payload.starting_deposit is None
+        or payload.started_at is None
+        or payload.total_profit is None
+    ):
+        return ""
+
+    current_time = now or datetime.now(timezone.utc)
+    started_at = payload.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    else:
+        started_at = started_at.astimezone(timezone.utc)
+    current_time = current_time.astimezone(timezone.utc)
+    elapsed_seconds = max(
+        60.0,
+        (current_time - started_at).total_seconds(),
+    )
+    average_per_day = float(payload.total_profit) * 86_400 / elapsed_seconds
+
+    return (
+        "\n\n________________________\n"
+        f"Депозит: <b>{_format_compact_number(payload.starting_deposit, 2)}</b>\n"
+        f"Старт: <b>{_format_elapsed(started_at, current_time)} назад</b>\n"
+        f"Общая прибыль: <b>{_format_compact_number(payload.total_profit, 1)}</b>\n"
+        f"Средняя в сутки: <b>{_format_compact_number(average_per_day, 1)}</b>"
+    )
 
 
 def _format_message(payload: TelegramStrategyNotificationRequest) -> str:
@@ -50,6 +113,7 @@ def _format_message(payload: TelegramStrategyNotificationRequest) -> str:
             f"Последняя ставка: <b>{_format_number(payload.bet or 0)}</b>\n"
             f"Множитель раунда: <b>{_format_number(payload.multiplier or 0)}x</b>\n\n"
             f"Стратегия: <b>{strategy}</b>"
+            f"{_format_profit_summary(payload)}"
         )
 
     return (
