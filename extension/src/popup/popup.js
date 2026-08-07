@@ -31,6 +31,8 @@ const elements = {
     "#strategyDescriptionClose"
   ),
   strategyStatusX340: document.querySelector("#strategyStatusX340"),
+  strategyStatisticsX340: document.querySelector("#strategyStatisticsX340"),
+  strategyResetStatisticsX340: document.querySelector("#strategyResetStatisticsX340"),
   strategyFifteenPlusX512Enabled: document.querySelector(
     "#strategyFifteenPlusX512Enabled"
   ),
@@ -65,6 +67,8 @@ const elements = {
     "#strategyFifteenPlusX512DescriptionClose"
   ),
   strategyStatusX512: document.querySelector("#strategyStatusX512"),
+  strategyStatisticsX512: document.querySelector("#strategyStatisticsX512"),
+  strategyResetStatisticsX512: document.querySelector("#strategyResetStatisticsX512"),
   preparationEnabled: document.querySelector("#preparationEnabled"),
   preparationBet: document.querySelector("#preparationBet"),
   preparationCashout: document.querySelector("#preparationCashout"),
@@ -238,6 +242,12 @@ elements.strategyFifteenPlusX512DescriptionDialog.addEventListener(
     }
   }
 );
+elements.strategyResetStatisticsX340.addEventListener("click", () => {
+  void resetPersistentStrategyStatistics(STRATEGY_ID);
+});
+elements.strategyResetStatisticsX512.addEventListener("click", () => {
+  void resetPersistentStrategyStatistics(X512_STRATEGY_ID);
+});
 for (const toggle of document.querySelectorAll(".strategy-summary-toggle")) {
   toggle.addEventListener("click", (event) => event.stopPropagation());
   toggle.addEventListener("keydown", (event) => event.stopPropagation());
@@ -284,7 +294,8 @@ function render(response) {
     collector,
     preparation,
     strategy,
-    telegram
+    telegram,
+    strategyStatistics
   } = response;
 
   elements.version.textContent = `v${version || "?"}`;
@@ -351,6 +362,7 @@ function render(response) {
 
   renderTelegramStatus(telegram, settings);
   renderStrategyStatuses(strategy, settings);
+  renderPersistentStrategyStatistics(strategyStatistics);
   renderPreparationStatus(preparation, settings);
 
   elements.resultQueueSize.textContent = String(queues.resultQueueSize || 0);
@@ -535,6 +547,78 @@ function renderSingleStrategyStatus({
   element.textContent =
     `${state.message || `Ожидание сигнала: ${Math.min(streak, signalLength)}/${signalLength}`}` +
     stopSuffix + reinvestmentSuffix;
+}
+
+function renderPersistentStrategyStatistics(statisticsByStrategy) {
+  const source =
+    statisticsByStrategy && typeof statisticsByStrategy === "object"
+      ? statisticsByStrategy
+      : {};
+  renderSinglePersistentStatistics(
+    elements.strategyStatisticsX340,
+    source[STRATEGY_ID]
+  );
+  renderSinglePersistentStatistics(
+    elements.strategyStatisticsX512,
+    source[X512_STRATEGY_ID]
+  );
+}
+
+function renderSinglePersistentStatistics(element, statistics) {
+  if (!statistics) {
+    element.textContent = "Нет данных. Отсчёт начнётся при запуске стратегии.";
+    return;
+  }
+
+  const totalPnl = Number(statistics.totalPnl || 0);
+  const pnlPrefix = totalPnl > 0 ? "+" : "";
+  element.textContent =
+    `Старт: ${formatDateTime(statistics.startedAt)} · ` +
+    `Депозит: ${formatNumber(statistics.startingDeposit || 0)} · ` +
+    `Прибыль: ${pnlPrefix}${formatNumber(totalPnl)} · ` +
+    `Выигрышных циклов: ${Math.max(0, Number(statistics.completedCycles || 0))} · ` +
+    `Стопов: ${Math.max(0, Number(statistics.stoppedCycles || 0))}`;
+}
+
+async function resetPersistentStrategyStatistics(strategyId) {
+  if (settingsDirty) {
+    setStatus("Сначала сохраните изменённые настройки", true);
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "Сбросить постоянную статистику этой стратегии и начать новый отсчёт?"
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  setStatus("Сброс статистики…");
+  const response = await chrome.runtime.sendMessage({
+    type: "RESET_STRATEGY_STATISTICS",
+    strategyId
+  });
+  if (!response?.ok) {
+    setStatus(response?.error || "Не удалось сбросить статистику", true);
+    return;
+  }
+
+  setStatus("Статистика сброшена", false, true);
+  await load(false);
+}
+
+function formatDateTime(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+  return date.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function renderPreparationStatus(preparation, settings) {

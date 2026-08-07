@@ -12,6 +12,7 @@ from app.core.database import engine
 from app.models.base import Base
 from app.models.diagnostic_sample import DiagnosticSample  # noqa: F401
 from app.models.game_result import GameResult  # noqa: F401
+from app.models.strategy_cycle import StrategyCycle  # noqa: F401
 
 
 @asynccontextmanager
@@ -27,7 +28,7 @@ web_directory = Path(__file__).resolve().parent / "web"
 
 app = FastAPI(
     title=settings.app_name,
-    version="1.2.0",
+    version="1.2.1",
     lifespan=lifespan,
 )
 

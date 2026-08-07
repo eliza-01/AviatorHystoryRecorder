@@ -1,13 +1,20 @@
 import {
   RESULT_BATCH_SIZE,
-  SAMPLE_BATCH_SIZE
+  SAMPLE_BATCH_SIZE,
+  STRATEGY_CYCLE_BATCH_SIZE
 } from "./constants.js";
-import { sendResultBatch, sendSampleBatch } from "./api-client.js";
+import {
+  sendResultBatch,
+  sendSampleBatch,
+  sendStrategyCycleBatch
+} from "./api-client.js";
 import {
   removeResults,
   removeSamples,
+  removeStrategyCycles,
   takeResults,
-  takeSamples
+  takeSamples,
+  takeStrategyCycles
 } from "./queue-service.js";
 import { updateStats } from "./stats-service.js";
 
@@ -50,6 +57,12 @@ async function doFlush() {
         acceptedSamples: await incrementStat("acceptedSamples", response.accepted),
         lastError: null
       });
+    }
+
+    const strategyCycleBatch = await takeStrategyCycles(STRATEGY_CYCLE_BATCH_SIZE);
+    if (strategyCycleBatch.length > 0) {
+      await sendStrategyCycleBatch(strategyCycleBatch);
+      await removeStrategyCycles(strategyCycleBatch.length);
     }
 
     await updateStats({

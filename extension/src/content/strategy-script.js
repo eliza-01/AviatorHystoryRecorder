@@ -437,9 +437,14 @@
     if (state.awaitingResult) {
       if (round.multiplier > strategyTarget()) {
         const notification = finishProfitableCycle(round.multiplier);
+        const persistentNotification = await recordCycleOutcome(
+          round,
+          "profit",
+          notification
+        );
         queueStrategyNotification(
           "profit",
-          notification,
+          persistentNotification,
           `profit:${round.roundId}:${notification.step}`
         );
         await persistState();
@@ -454,6 +459,7 @@
 
       if (settings.stopStep > 0 && state.step >= settings.stopStep) {
         const notification = finishStoppedCycle();
+        await recordCycleOutcome(round, "stop", notification);
         queueStrategyNotification(
           "stop",
           notification,
@@ -672,6 +678,7 @@
       step: completedStep,
       drawdown,
       profit: Math.max(0, pnl),
+      pnl,
       multiplier: Number(multiplier),
       bet: activeBet,
       startingDeposit,
@@ -707,7 +714,8 @@
     const notification = {
       step: completedStep,
       drawdown,
-      loss
+      loss,
+      pnl
     };
 
     state.stoppedCycles += 1;
@@ -1151,6 +1159,56 @@
       `series:${round.roundId}:${seriesLength}`
     );
     return true;
+  }
+
+  async function recordCycleOutcome(round, outcome, notification) {
+    if (!controllerToken || !round?.roundId) {
+      return notification;
+    }
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "RECORD_STRATEGY_CYCLE",
+        pageUrl: location.href,
+        frameUrl: location.href,
+        controllerToken,
+        cycle: {
+          cycleKey: `${outcome}:${round.roundId}:${notification.step}`,
+          roundId: round.roundId,
+          outcome,
+          pnl: Number(notification.pnl || 0),
+          step: notification.step,
+          drawdown: notification.drawdown || 0,
+          bet:
+            outcome === "profit"
+              ? Number(notification.bet || 0)
+              : null,
+          multiplier:
+            outcome === "profit"
+              ? Number(notification.multiplier || round.multiplier || 0)
+              : Number(round.multiplier || 0),
+          occurredAt: new Date().toISOString()
+        }
+      });
+
+      if (!response?.ok || !response.statistics) {
+        return notification;
+      }
+
+      if (outcome === "profit") {
+        return {
+          ...notification,
+          startingDeposit: Number(response.statistics.startingDeposit || 0),
+          startedAt: response.statistics.startedAt,
+          totalProfit: Number(response.statistics.totalPnl || 0)
+        };
+      }
+      return notification;
+    } catch {
+      // Локальное состояние цикла всё равно будет сохранено. При недоступном
+      // service worker Telegram использует резервные значения runtime-state.
+      return notification;
+    }
   }
 
   function queueStrategyNotification(reason, payload, notificationKey) {

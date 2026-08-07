@@ -626,3 +626,26 @@ button.secondary {
   color: #aeb5bf;
   font-size: 11px;
 }
+
+
+.strategy-statistics-box {
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  border: 1px solid #343a43;
+  border-radius: 7px;
+  background: #191c20;
+  color: #9aa2ad;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.strategy-statistics-box strong {
+  color: #aeb5bf;
+  font-size: 11px;
+}
+
+.strategy-reset-statistics {
+  justify-self: start;
+  margin-top: 2px;
+}

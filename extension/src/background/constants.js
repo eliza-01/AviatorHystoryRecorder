@@ -31,6 +31,8 @@ export const STORAGE_KEYS = Object.freeze({
   collectorFrames: "collectorFrames",
   preparationFrames: "preparationFrames",
   strategyStates: "strategyStates",
+  strategyStatistics: "strategyStatistics",
+  strategyCycleQueue: "strategyCycleQueue",
   strategyControllers: "strategyControllers",
   telegramStatus: "telegramStatus"
 });
@@ -39,3 +41,5 @@ export const MAX_RESULT_QUEUE_SIZE = 5000;
 export const MAX_SAMPLE_QUEUE_SIZE = 1000;
 export const RESULT_BATCH_SIZE = 200;
 export const SAMPLE_BATCH_SIZE = 100;
+export const MAX_STRATEGY_CYCLE_QUEUE_SIZE = 5000;
+export const STRATEGY_CYCLE_BATCH_SIZE = 200;

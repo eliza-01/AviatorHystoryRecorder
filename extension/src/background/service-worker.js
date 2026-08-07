@@ -11,6 +11,7 @@ import {
 import {
   enqueueResults,
   enqueueSamples,
+  enqueueStrategyCycles,
   getQueueSizes
 } from "./queue-service.js";
 import {
@@ -21,8 +22,15 @@ import {
 } from "./settings-service.js";
 import {
   getActiveStrategyConfig,
-  isKnownStrategyId
+  isKnownStrategyId,
+  STRATEGY_DEFINITIONS
 } from "./strategy-config.js";
+import {
+  ensureStrategyStatistics,
+  getAllStrategyStatistics,
+  recordStrategyCycle,
+  resetStrategyStatistics
+} from "./strategy-statistics-service.js";
 import { getStats } from "./stats-service.js";
 import { isAviatorTabUrl } from "./url-service.js";
 
@@ -143,6 +151,12 @@ async function handleMessage(message, sender) {
     case "SEND_STRATEGY_NOTIFICATION":
       return sendStrategyNotification(sender, message);
 
+    case "RECORD_STRATEGY_CYCLE":
+      return recordStrategyCycleMessage(sender, message);
+
+    case "RESET_STRATEGY_STATISTICS":
+      return resetStrategyStatisticsMessage(message);
+
     case "GET_POPUP_STATE":
       return getPopupState();
 
@@ -180,6 +194,9 @@ async function getCaptureState(sender, message) {
     topUrl,
     activeStrategy?.id || null
   );
+  const strategyStatistics = activeStrategy
+    ? await ensureStatisticsForRuntime(activeStrategy, strategyState)
+    : null;
 
   return {
     ok: true,
@@ -230,7 +247,8 @@ async function getCaptureState(sender, message) {
     ),
     telegramConfigured: Boolean(settings.telegramChatId),
     activeStrategy: aviatorTab ? activeStrategy : null,
-    strategyState
+    strategyState,
+    strategyStatistics
   };
 }
 
@@ -348,7 +366,8 @@ async function getPopupState() {
     collectorStored,
     preparationStored,
     strategyStored,
-    telegramStored
+    telegramStored,
+    strategyStatistics
   ] = await Promise.all([
     getSettings(),
     getStats(),
@@ -356,7 +375,8 @@ async function getPopupState() {
     chrome.storage.local.get(STORAGE_KEYS.collectorFrames),
     chrome.storage.local.get(STORAGE_KEYS.preparationFrames),
     chrome.storage.local.get(STORAGE_KEYS.strategyStates),
-    chrome.storage.local.get(STORAGE_KEYS.telegramStatus)
+    chrome.storage.local.get(STORAGE_KEYS.telegramStatus),
+    getAllStrategyStatistics()
   ]);
 
   const activeStrategy = getActiveStrategyConfig(settings);
@@ -378,7 +398,8 @@ async function getPopupState() {
       strategyStored[STORAGE_KEYS.strategyStates],
       activeStrategy?.id || null
     ),
-    telegram: telegramStored[STORAGE_KEYS.telegramStatus] || null
+    telegram: telegramStored[STORAGE_KEYS.telegramStatus] || null,
+    strategyStatistics
   };
 }
 
@@ -783,6 +804,211 @@ function withStrategyControllerLock(tabId, task) {
   });
 }
 
+
+async function ensureStatisticsForRuntime(activeStrategy, strategyState = null) {
+  if (!activeStrategy) {
+    return null;
+  }
+
+  const startingDeposit = Math.max(
+    0,
+    Number(
+      strategyState?.startingDeposit ??
+        activeStrategy.startingDeposit ??
+        activeStrategy.minimumDeposit ??
+        0
+    )
+  );
+  if (!Number.isFinite(startingDeposit) || startingDeposit <= 0) {
+    return null;
+  }
+
+  const legacyBalance = Number(strategyState?.strategyBalance);
+  const legacyTotalPnl = Number.isFinite(legacyBalance)
+    ? Number((legacyBalance - startingDeposit).toFixed(4))
+    : 0;
+
+  return ensureStrategyStatistics({
+    strategyId: activeStrategy.id,
+    strategyName: activeStrategy.name,
+    startingDeposit,
+    startedAt: strategyState?.startedAt || null,
+    legacyTotalPnl,
+    legacyCompletedCycles: strategyState?.completedCycles || 0,
+    legacyStoppedCycles: strategyState?.stoppedCycles || 0
+  });
+}
+
+async function recordStrategyCycleMessage(sender, message) {
+  const settings = await getSettings();
+  const activeStrategy = getActiveStrategyConfig(settings);
+  const topUrl = sender.tab?.url || message.pageUrl || "";
+
+  if (!isAviatorTabUrl(topUrl)) {
+    return { ok: false, error: "Цикл разрешено сохранять только из вкладки Aviator" };
+  }
+  if (!activeStrategy) {
+    return { ok: false, error: "Стратегия выключена" };
+  }
+
+  const ownership = await verifyStrategyController(sender, message);
+  if (!ownership.owner) {
+    return { ok: false, error: "Цикл отклонён: iframe не управляет стратегией" };
+  }
+
+  const runtimeState = await getStrategyStateForTab(
+    sender.tab?.id,
+    topUrl,
+    activeStrategy.id
+  );
+  const statistics =
+    (await ensureStatisticsForRuntime(activeStrategy, runtimeState)) ||
+    (await ensureStrategyStatistics({
+      strategyId: activeStrategy.id,
+      strategyName: activeStrategy.name,
+      startingDeposit: resolveConfiguredStatisticsStartingDeposit(
+        activeStrategy.id,
+        settings
+      )
+    }));
+
+  const source = message.cycle && typeof message.cycle === "object"
+    ? message.cycle
+    : {};
+  const outcome = source.outcome === "stop" ? "stop" : "profit";
+  const cycleKey = String(
+    source.cycleKey || `${outcome}:${source.roundId || "unknown"}:${source.step || 1}`
+  ).slice(0, 300);
+  const eventKey = await sha256Hex(
+    `${statistics.sessionId}|${activeStrategy.id}|${cycleKey}`
+  );
+  const occurredAt = sanitizeIsoTimestamp(source.occurredAt);
+  const pnl = Number(source.pnl);
+  if (!Number.isFinite(pnl)) {
+    throw new Error("Некорректный PnL цикла");
+  }
+
+  const cycleRecord = {
+    event_key: eventKey,
+    session_id: statistics.sessionId,
+    strategy_id: activeStrategy.id,
+    strategy_name: activeStrategy.name,
+    outcome,
+    target: activeStrategy.target,
+    signal_length: activeStrategy.signalLength,
+    starting_deposit: statistics.startingDeposit,
+    round_id: source.roundId ? String(source.roundId).slice(0, 160) : null,
+    step: Math.max(1, Math.round(Number(source.step) || 1)),
+    pnl: Number(pnl.toFixed(4)),
+    drawdown: Math.max(0, Number(Number(source.drawdown || 0).toFixed(4))),
+    bet:
+      source.bet === null || source.bet === undefined
+        ? null
+        : Math.max(0, Number(Number(source.bet).toFixed(4))),
+    multiplier:
+      source.multiplier === null || source.multiplier === undefined
+        ? null
+        : Math.max(0, Number(Number(source.multiplier).toFixed(2))),
+    occurred_at: occurredAt,
+    metadata: {
+      extension_version: chrome.runtime.getManifest().version
+    }
+  };
+
+  // Сначала ставим событие в долговременную очередь backend. Если service worker
+  // будет выгружен между операциями, повторная попытка безопасна: event_key уникален.
+  await enqueueStrategyCycles([cycleRecord]);
+  const result = await recordStrategyCycle({
+    strategyId: activeStrategy.id,
+    strategyName: activeStrategy.name,
+    startingDeposit: statistics.startingDeposit,
+    eventKey,
+    roundId: cycleRecord.round_id,
+    outcome,
+    pnl: cycleRecord.pnl,
+    step: cycleRecord.step,
+    drawdown: cycleRecord.drawdown,
+    bet: cycleRecord.bet,
+    multiplier: cycleRecord.multiplier,
+    occurredAt
+  });
+  void flushQueues();
+
+  return {
+    ok: true,
+    duplicate: result.duplicate,
+    statistics: result.statistics
+  };
+}
+
+async function resetStrategyStatisticsMessage(message) {
+  const strategyId = String(message?.strategyId || "");
+  if (!isKnownStrategyId(strategyId)) {
+    return { ok: false, error: "Неизвестная стратегия" };
+  }
+
+  const settings = await getSettings();
+  const definition = STRATEGY_DEFINITIONS[strategyId];
+  const statistics = await resetStrategyStatistics({
+    strategyId,
+    strategyName: definition.name,
+    startingDeposit: resolveConfiguredStatisticsStartingDeposit(
+      strategyId,
+      settings
+    )
+  });
+  return { ok: true, statistics };
+}
+
+function resolveConfiguredStatisticsStartingDeposit(strategyId, settings) {
+  const definition = STRATEGY_DEFINITIONS[strategyId];
+  if (!definition) {
+    return 0;
+  }
+  if (definition.startingDepositKey) {
+    return Math.max(
+      Number(definition.minimumDeposit || 0),
+      Number(settings?.[definition.startingDepositKey] || definition.minimumDeposit || 0)
+    );
+  }
+
+  const stopStep = Math.max(
+    0,
+    Math.round(Number(settings?.[definition.stopStepKey] || definition.fixedStopStep || 0))
+  );
+  return calculateMinimumDepositForStrategy(
+    definition.target,
+    stopStep,
+    definition.initialBet || 0.2
+  );
+}
+
+function calculateMinimumDepositForStrategy(target, stopStep, initialBet = 0.2) {
+  if (stopStep <= 0 || target <= 1) {
+    return 0;
+  }
+  let cumulativeLoss = 0;
+  let bet = Number(initialBet);
+  for (let step = 1; step <= stopStep; step += 1) {
+    cumulativeLoss = Math.round((cumulativeLoss + bet + Number.EPSILON) * 100) / 100;
+    if (step < stopStep) {
+      bet = Math.max(
+        initialBet,
+        Math.ceil(((cumulativeLoss + initialBet) / (target - 1) - 1e-12) * 100) / 100
+      );
+    }
+  }
+  return Math.ceil(cumulativeLoss - 1e-9);
+}
+
+async function sha256Hex(value) {
+  const encoded = new TextEncoder().encode(String(value));
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 async function sendStrategyNotification(sender, message) {
   const settings = await getSettings();
   const activeStrategy = getActiveStrategyConfig(settings);
@@ -999,6 +1225,7 @@ async function saveStrategyState(sender, message) {
 
     states[String(tabId)] = state;
     await chrome.storage.local.set({ [STORAGE_KEYS.strategyStates]: states });
+    await ensureStatisticsForRuntime(activeStrategy, state);
 
     return { ok: true, state };
   });

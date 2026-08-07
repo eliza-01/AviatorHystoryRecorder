@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Aviator History Recorder",
-  "version": "1.9.7",
-  "description": "Сохраняет результаты Aviator, управляет подготовкой, стратегиями ставок, Telegram-уведомлениями и автообновлением вкладки.",
+  "version": "1.9.8",
+  "description": "Сохраняет результаты Aviator, управляет стратегиями ставок, постоянной статистикой, Telegram-уведомлениями и автообновлением вкладки.",
   "permissions": [
     "storage",
     "alarms"

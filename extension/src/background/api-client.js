@@ -36,6 +36,13 @@ export function sendSampleBatch(samples) {
   });
 }
 
+export function sendStrategyCycleBatch(cycles) {
+  return request("/api/v1/strategy/cycles/batch", {
+    method: "POST",
+    body: JSON.stringify({ cycles })
+  });
+}
+
 export function sendTelegramStrategyNotification(notification) {
   return request("/api/v1/telegram/strategy-notification", {
     method: "POST",

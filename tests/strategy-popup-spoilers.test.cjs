@@ -29,10 +29,16 @@ assert.match(
 assert.match(html, /15\+ - x5\.12/);
 assert.match(html, /id="strategyFifteenPlusX512StartingDeposit"[\s\S]*?min="14"[\s\S]*?step="14"/);
 assert.match(html, /Фиксированный стоп: 16 шагов/);
+assert.match(html, /id="strategyStatisticsX340"/);
+assert.match(html, /id="strategyStatisticsX512"/);
+assert.match(html, /id="strategyResetStatisticsX340"/);
+assert.match(html, /id="strategyResetStatisticsX512"/);
 assert.match(popupJs, /X512_STRATEGY_TARGET = 5\.12/);
 assert.match(popupJs, /X512_STRATEGY_SIGNAL_LENGTH = 15/);
 assert.match(popupJs, /X512_STRATEGY_STOP_STEP = 16/);
 assert.match(popupJs, /elements\.strategyFifteenPlusX512Enabled\.checked = false/);
 assert.match(popupJs, /elements\.strategyTenPlusX340Enabled\.checked = false/);
+assert.match(popupJs, /RESET_STRATEGY_STATISTICS/);
+assert.match(popupJs, /renderPersistentStrategyStatistics/);
 
 console.log('strategy-popup-spoilers.test.cjs: ok');

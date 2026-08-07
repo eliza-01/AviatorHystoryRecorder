@@ -1,6 +1,7 @@
 import {
   MAX_RESULT_QUEUE_SIZE,
   MAX_SAMPLE_QUEUE_SIZE,
+  MAX_STRATEGY_CYCLE_QUEUE_SIZE,
   STORAGE_KEYS
 } from "./constants.js";
 
@@ -48,12 +49,24 @@ export function enqueueSamples(values) {
   return append(STORAGE_KEYS.sampleQueue, values, MAX_SAMPLE_QUEUE_SIZE);
 }
 
+export function enqueueStrategyCycles(values) {
+  return append(
+    STORAGE_KEYS.strategyCycleQueue,
+    values,
+    MAX_STRATEGY_CYCLE_QUEUE_SIZE
+  );
+}
+
 export function takeResults(limit) {
   return take(STORAGE_KEYS.resultQueue, limit);
 }
 
 export function takeSamples(limit) {
   return take(STORAGE_KEYS.sampleQueue, limit);
+}
+
+export function takeStrategyCycles(limit) {
+  return take(STORAGE_KEYS.strategyCycleQueue, limit);
 }
 
 export function removeResults(count) {
@@ -64,10 +77,15 @@ export function removeSamples(count) {
   return removeFirst(STORAGE_KEYS.sampleQueue, count);
 }
 
+export function removeStrategyCycles(count) {
+  return removeFirst(STORAGE_KEYS.strategyCycleQueue, count);
+}
+
 export async function getQueueSizes() {
   const stored = await chrome.storage.local.get([
     STORAGE_KEYS.resultQueue,
-    STORAGE_KEYS.sampleQueue
+    STORAGE_KEYS.sampleQueue,
+    STORAGE_KEYS.strategyCycleQueue
   ]);
   return {
     resultQueueSize: Array.isArray(stored[STORAGE_KEYS.resultQueue])
@@ -75,6 +93,9 @@ export async function getQueueSizes() {
       : 0,
     sampleQueueSize: Array.isArray(stored[STORAGE_KEYS.sampleQueue])
       ? stored[STORAGE_KEYS.sampleQueue].length
+      : 0,
+    strategyCycleQueueSize: Array.isArray(stored[STORAGE_KEYS.strategyCycleQueue])
+      ? stored[STORAGE_KEYS.strategyCycleQueue].length
       : 0
   };
 }

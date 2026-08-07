@@ -44,7 +44,9 @@ async function createRuntime({
   const storageChangeListeners = [];
   const actions = [];
   const notifications = [];
+  const recordedCycles = [];
   let savedState = initialState;
+  let persistentStatistics = null;
   const runtimeSettings = {
     enabled: true,
     stopStep,
@@ -151,6 +153,32 @@ async function createRuntime({
             assert.strictEqual(message.controllerToken, 'owner-token');
             savedState = JSON.parse(JSON.stringify(message.state));
             return { ok: true, state: savedState };
+          case 'RECORD_STRATEGY_CYCLE': {
+            recordedCycles.push(message.cycle);
+            if (!persistentStatistics) {
+              persistentStatistics = {
+                strategyId: runtimeSettings.strategyId,
+                strategyName: runtimeSettings.strategyName,
+                sessionId: `${runtimeSettings.strategyId}-test-session`,
+                startingDeposit: Number(
+                  runtimeSettings.startingDeposit ?? savedState?.startingDeposit ?? 20
+                ),
+                startedAt: savedState?.startedAt || new Date().toISOString(),
+                totalPnl: 0,
+                completedCycles: 0,
+                stoppedCycles: 0
+              };
+            }
+            persistentStatistics.totalPnl = Number(
+              (persistentStatistics.totalPnl + Number(message.cycle.pnl || 0)).toFixed(4)
+            );
+            if (message.cycle.outcome === 'stop') {
+              persistentStatistics.stoppedCycles += 1;
+            } else {
+              persistentStatistics.completedCycles += 1;
+            }
+            return { ok: true, statistics: { ...persistentStatistics } };
+          }
           case 'SEND_STRATEGY_NOTIFICATION':
             notifications.push(message);
             return { ok: true };
@@ -195,6 +223,7 @@ async function createRuntime({
   return {
     actions,
     notifications,
+    recordedCycles,
     getState: () => savedState,
     async updateNonCriticalSettings(patch) {
       Object.assign(runtimeSettings, patch);
@@ -410,6 +439,9 @@ async function createRuntime({
   assert.ok(Number.isFinite(
     Date.parse(x512ProfitNotification.notification.startedAt)
   ));
+  assert.strictEqual(x512.recordedCycles.length, 1);
+  assert.strictEqual(x512.recordedCycles[0].outcome, 'profit');
+  assert.strictEqual(x512.recordedCycles[0].pnl, 0.824);
 
 
 
@@ -440,6 +472,9 @@ async function createRuntime({
     0.59, 0.74, 0.92, 1.14, 1.42, 1.76, 2.19, 2.72
   ]);
   assert.strictEqual(x512Progression.getState().stoppedCycles, 1);
+  assert.strictEqual(x512Progression.recordedCycles.length, 1);
+  assert.strictEqual(x512Progression.recordedCycles[0].outcome, 'stop');
+  assert.strictEqual(x512Progression.recordedCycles[0].pnl, -13.7);
   assert.strictEqual(x512Progression.getState().strategyBalance, 0.30);
   assert.strictEqual(x512Progression.getState().minimumDeposit, 14);
 
