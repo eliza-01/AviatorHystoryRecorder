@@ -649,3 +649,55 @@ button.secondary {
   justify-self: start;
   margin-top: 2px;
 }
+
+.strategy-deposit-apply-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.strategy-deposit-apply-row .field {
+  margin-bottom: 0;
+}
+
+.strategy-deposit-apply-row button {
+  min-width: 48px;
+  height: 34px;
+  padding: 7px 10px;
+}
+
+.strategy-step-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #343a43;
+  border-radius: 7px;
+  background: #191c20;
+}
+
+.strategy-step-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.strategy-step-table th,
+.strategy-step-table td {
+  padding: 6px 7px;
+  border-bottom: 1px solid #2b3037;
+  text-align: right;
+}
+
+.strategy-step-table th:first-child,
+.strategy-step-table td:first-child {
+  text-align: center;
+}
+
+.strategy-step-table th {
+  color: #aeb5bf;
+  font-weight: 600;
+}
+
+.strategy-step-table tbody tr:last-child td {
+  border-bottom: 0;
+}

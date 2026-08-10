@@ -625,7 +625,7 @@
     }
 
     const bet = roundToCent(
-      Math.max(state.cycleInitialBet || INITIAL_BET, state.nextBet)
+      Math.max(state.cycleInitialBet || strategyInitialBet(), state.nextBet)
     );
     state.stage = "arming";
     state.autoReloadPaused = true;
@@ -761,14 +761,15 @@
   }
 
   function calculateNextCycleInitialBet() {
+    const baseInitialBet = strategyInitialBet();
     if (!settings?.reinvestmentEnabled) {
-      return INITIAL_BET;
+      return baseInitialBet;
     }
 
     const minimumDeposit = calculateMinimumStartingDeposit();
     const reinvestmentStep = calculateReinvestmentBalanceStep();
     if (minimumDeposit <= 0 || reinvestmentStep <= 0) {
-      return INITIAL_BET;
+      return baseInitialBet;
     }
 
     const startingDeposit = calculateConfiguredStartingDeposit();
@@ -779,12 +780,17 @@
     const profit = Math.max(0, balance - startingDeposit);
     const levels = Math.floor((profit + 1e-9) / reinvestmentStep);
     return roundToCent(
-      INITIAL_BET + levels * REINVESTMENT_BET_INCREMENT
+      baseInitialBet + levels * REINVESTMENT_BET_INCREMENT
     );
   }
 
   function calculateMinimumStartingDeposit(stopStep = settings?.stopStep) {
-    const details = calculateStopStepDetails(stopStep, INITIAL_BET);
+    const configuredMinimum = Math.max(0, Number(settings?.minimumDeposit) || 0);
+    if (configuredMinimum > 0) {
+      return configuredMinimum;
+    }
+
+    const details = calculateStopStepDetails(stopStep, strategyInitialBet());
     return details
       ? Math.ceil(details.cumulativeLoss - 1e-9)
       : 0;
@@ -799,7 +805,7 @@
 
   function calculateStopStepDetails(
     stopStep,
-    initialBet = INITIAL_BET
+    initialBet = strategyInitialBet()
   ) {
     const normalizedStep = normalizeStopStep(stopStep);
     if (normalizedStep <= 0) {
@@ -826,13 +832,14 @@
   }
 
   function calculateRecoveryBet(cumulativeLoss) {
+    const baseInitialBet = strategyInitialBet();
     const cycleInitialBet = Math.max(
-      INITIAL_BET,
-      Number(state?.cycleInitialBet || INITIAL_BET)
+      baseInitialBet,
+      Number(state?.cycleInitialBet || baseInitialBet)
     );
     const cycleTargetProfit = Math.max(
       cycleInitialBet,
-      Number(state?.cycleTargetProfit || cycleInitialBet || MIN_PROFIT)
+      Number(state?.cycleTargetProfit || cycleInitialBet || baseInitialBet)
     );
     const raw = (cumulativeLoss + cycleTargetProfit) / (strategyTarget() - 1);
     return Math.max(cycleInitialBet, ceilToStep(raw, BET_STEP));
@@ -1000,6 +1007,7 @@
   }
 
   function createInitialState(configSignature) {
+    const baseInitialBet = strategyInitialBet();
     const minimumDeposit = calculateMinimumStartingDeposit();
     const startingDeposit = calculateConfiguredStartingDeposit();
     const reinvestmentStep = calculateReinvestmentBalanceStep();
@@ -1016,9 +1024,9 @@
       reinvestmentStep,
       strategyBalance: startingDeposit,
       startedAt: new Date().toISOString(),
-      cycleInitialBet: INITIAL_BET,
-      cycleTargetProfit: MIN_PROFIT,
-      nextBet: INITIAL_BET,
+      cycleInitialBet: baseInitialBet,
+      cycleTargetProfit: baseInitialBet,
+      nextBet: baseInitialBet,
       activeBet: null,
       awaitingResult: false,
       autoReloadPaused: false,
@@ -1041,6 +1049,7 @@
   function normalizeState(value, configSignature) {
     const initial = createInitialState(configSignature);
     const source = value && typeof value === "object" ? value : {};
+    const baseInitialBet = strategyInitialBet();
     return {
       ...initial,
       ...source,
@@ -1057,18 +1066,18 @@
       ),
       startedAt: normalizeIsoTimestamp(source.startedAt, initial.startedAt),
       cycleInitialBet: Math.max(
-        INITIAL_BET,
-        Number(source.cycleInitialBet || INITIAL_BET)
+        baseInitialBet,
+        Number(source.cycleInitialBet || baseInitialBet)
       ),
       cycleTargetProfit: Math.max(
-        INITIAL_BET,
-        Number(source.cycleTargetProfit || source.cycleInitialBet || MIN_PROFIT)
+        baseInitialBet,
+        Number(source.cycleTargetProfit || source.cycleInitialBet || baseInitialBet)
       ),
-      nextBet: Math.max(INITIAL_BET, Number(source.nextBet || INITIAL_BET)),
+      nextBet: Math.max(baseInitialBet, Number(source.nextBet || baseInitialBet)),
       activeBet:
         source.activeBet === null || source.activeBet === undefined
           ? null
-          : Math.max(INITIAL_BET, Number(source.activeBet)),
+          : Math.max(baseInitialBet, Number(source.activeBet)),
       awaitingResult: Boolean(source.awaitingResult),
       autoReloadPaused: Boolean(source.autoReloadPaused),
       completedCycles: Math.max(0, Number(source.completedCycles || 0)),
@@ -1249,6 +1258,7 @@
         id: DEFAULT_STRATEGY_ID,
         name: DEFAULT_STRATEGY_NAME,
         target: DEFAULT_TARGET,
+        initialBet: INITIAL_BET,
         signalLength: DEFAULT_SIGNAL_LENGTH,
         pauseAt: DEFAULT_AUTO_RELOAD_PAUSE_AT,
         stopStep: 0,
@@ -1277,6 +1287,7 @@
       id: String(source.id),
       name: String(source.name || source.id),
       target: Math.max(1.01, Number(source.target) || DEFAULT_TARGET),
+      initialBet: Math.max(BET_STEP, roundToCent(Number(source.initialBet) || INITIAL_BET)),
       signalLength,
       pauseAt,
       stopStep: normalizeStopStep(source.stopStep),
@@ -1302,6 +1313,10 @@
 
   function strategyTarget() {
     return Math.max(1.01, Number(settings?.target || DEFAULT_TARGET));
+  }
+
+  function strategyInitialBet() {
+    return Math.max(BET_STEP, roundToCent(Number(settings?.initialBet) || INITIAL_BET));
   }
 
   function strategySignalLength() {

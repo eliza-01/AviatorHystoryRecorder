@@ -13,6 +13,8 @@ const MIN_BADGE_OPACITY_PERCENT = 10;
 const MAX_BADGE_OPACITY_PERCENT = 100;
 const X512_MINIMUM_DEPOSIT = 14;
 const X512_MAXIMUM_DEPOSIT = 1_400_000;
+const X512_20_MINIMUM_DEPOSIT = 13.41;
+const X512_20_MAXIMUM_DEPOSIT = 10_000_000;
 
 export async function getSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.settings);
@@ -154,6 +156,19 @@ export function normalizeX512StartingDeposit(value) {
   return Math.ceil(bounded / X512_MINIMUM_DEPOSIT) * X512_MINIMUM_DEPOSIT;
 }
 
+export function normalizeTwentyPlusX512StartingDeposit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SETTINGS.strategyTwentyPlusX512StartingDeposit;
+  }
+
+  const bounded = Math.min(
+    X512_20_MAXIMUM_DEPOSIT,
+    Math.max(X512_20_MINIMUM_DEPOSIT, parsed)
+  );
+  return Math.round((bounded + Number.EPSILON) * 100) / 100;
+}
+
 function sanitizeSettings(value) {
   const settings = {
     ...DEFAULT_SETTINGS,
@@ -221,9 +236,29 @@ function sanitizeSettings(value) {
       DEFAULT_SETTINGS.strategyFifteenPlusX512NotifySeriesLength
     );
 
+  settings.strategyTwentyPlusX512Enabled = Boolean(
+    settings.strategyTwentyPlusX512Enabled
+  );
+  settings.strategyTwentyPlusX512StartingDeposit =
+    normalizeTwentyPlusX512StartingDeposit(
+      settings.strategyTwentyPlusX512StartingDeposit
+    );
+  settings.strategyTwentyPlusX512NotifySeriesEnabled = Boolean(
+    settings.strategyTwentyPlusX512NotifySeriesEnabled
+  );
+  settings.strategyTwentyPlusX512NotifySeriesLength =
+    normalizeStrategySeriesLength(
+      settings.strategyTwentyPlusX512NotifySeriesLength,
+      20,
+      DEFAULT_SETTINGS.strategyTwentyPlusX512NotifySeriesLength
+    );
+
   // Одновременно интерфейсом ставки может управлять только одна стратегия.
-  // При конфликте приоритет получает новая рекомендованная стратегия.
-  if (
+  // При конфликте приоритет получает 20+ - x5.12, затем 15+ - x5.12.
+  if (settings.strategyTwentyPlusX512Enabled) {
+    settings.strategyFifteenPlusX512Enabled = false;
+    settings.strategyTenPlusX340Enabled = false;
+  } else if (
     settings.strategyFifteenPlusX512Enabled &&
     settings.strategyTenPlusX340Enabled
   ) {
@@ -245,7 +280,8 @@ function sanitizeSettings(value) {
 
   if (
     settings.strategyTenPlusX340Enabled ||
-    settings.strategyFifteenPlusX512Enabled
+    settings.strategyFifteenPlusX512Enabled ||
+    settings.strategyTwentyPlusX512Enabled
   ) {
     settings.preparationEnabled = false;
   }

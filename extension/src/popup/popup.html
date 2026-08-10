@@ -121,12 +121,9 @@
         </div>
       </details>
 
-      <details class="strategy-card strategy-card-recommended" id="strategyFifteenPlusX512Card">
+      <details class="strategy-card" id="strategyFifteenPlusX512Card">
         <summary class="strategy-card-summary">
-          <span class="strategy-card-title">
-            15+ - x5.12
-            <span class="strategy-recommended-badge">рекомендуемая</span>
-          </span>
+          <span class="strategy-card-title">15+ - x5.12</span>
           <label class="toggle-control strategy-summary-toggle" title="Включить стратегию">
             <input id="strategyFifteenPlusX512Enabled" type="checkbox">
             <span class="toggle-track" aria-hidden="true"></span>
@@ -208,6 +205,101 @@
             Описание
           </button>
           <small id="strategyStatusX512">Стратегия выключена</small>
+        </div>
+      </details>
+
+      <details class="strategy-card strategy-card-recommended" id="strategyTwentyPlusX512Card">
+        <summary class="strategy-card-summary">
+          <span class="strategy-card-title">
+            20+ - x5.12
+            <span class="strategy-recommended-badge">рекомендуемая</span>
+          </span>
+          <label class="toggle-control strategy-summary-toggle" title="Включить стратегию">
+            <input id="strategyTwentyPlusX512Enabled" type="checkbox">
+            <span class="toggle-track" aria-hidden="true"></span>
+          </label>
+        </summary>
+
+        <div class="strategy-card-body">
+          <div class="strategy-summary">
+            <span>Сигнал: 20 результатов ≤ 5.12</span>
+            <span>Фиксированный стоп: 11 шагов · резерв депозита: 3 полных стопа</span>
+          </div>
+
+          <div class="strategy-deposit-apply-row">
+            <label class="field strategy-deposit-field">
+              <span>Стартовый депозит</span>
+              <input
+                id="strategyTwentyPlusX512StartingDeposit"
+                type="number"
+                min="13.41"
+                max="10000000"
+                step="0.01"
+                value="13.41"
+                inputmode="decimal"
+              >
+            </label>
+            <button id="strategyTwentyPlusX512ApplyDeposit" type="button">OK</button>
+          </div>
+          <small id="strategyTwentyPlusX512DepositNote" class="strategy-stop-details">
+            Минимум 13.41 = полный стоп 4.47 × 3. Нажмите OK, чтобы применить депозит и пересчитать ставку.
+          </small>
+
+          <div class="strategy-fixed-details">
+            <strong>Расчёт по депозиту</strong>
+            <span id="strategyTwentyPlusX512StopDetails"></span>
+          </div>
+
+          <div class="strategy-step-table-wrap">
+            <table class="strategy-step-table">
+              <thead>
+                <tr>
+                  <th>Шаг</th>
+                  <th>Ставка</th>
+                  <th>Минус</th>
+                  <th>Прибыль</th>
+                </tr>
+              </thead>
+              <tbody id="strategyTwentyPlusX512Steps"></tbody>
+            </table>
+          </div>
+
+          <div class="strategy-notification-settings">
+            <label class="switch-row notification-switch">
+              <span>Уведомить о серии</span>
+              <span class="toggle-control">
+                <input id="strategyTwentyPlusX512NotifySeriesEnabled" type="checkbox" disabled>
+                <span class="toggle-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <label class="field strategy-series-field">
+              <span>Последовательность результатов ≤ 5.12</span>
+              <input
+                id="strategyTwentyPlusX512NotifySeriesLength"
+                type="number"
+                min="1"
+                max="20"
+                step="1"
+                value="18"
+                inputmode="numeric"
+                disabled
+              >
+            </label>
+            <small>Прибыль и достижение стопа отправляются автоматически.</small>
+          </div>
+
+          <div class="strategy-statistics-box">
+            <strong>Статистика</strong>
+            <span id="strategyStatisticsX512Twenty">Нет данных</span>
+            <button id="strategyResetStatisticsX512Twenty" type="button" class="secondary strategy-reset-statistics">
+              Сбросить статистику
+            </button>
+          </div>
+
+          <button id="strategyTwentyPlusX512Description" type="button" class="secondary strategy-description">
+            Описание
+          </button>
+          <small id="strategyStatusX512Twenty">Стратегия выключена</small>
         </div>
       </details>
     </section>
@@ -385,6 +477,24 @@
       <li>Минимальный стартовый депозит равен 14. Поле депозита принимает только кратные значения: 14, 28, 42 и далее.</li>
       <li>Увеличение стартового депозита не повышает базовую ставку 0.20 автоматически: оно создаёт дополнительный резерв на несколько стопов.</li>
       <li>При включённом реинвестировании ставка следующего цикла растёт на 0.01 за каждые полные 0.70 прибыли сверх выбранного стартового депозита.</li>
+    </ol>
+  </dialog>
+
+
+  <dialog id="strategyTwentyPlusX512DescriptionDialog" class="strategy-dialog">
+    <div class="strategy-dialog-header">
+      <strong>20+ - x5.12</strong>
+      <button id="strategyTwentyPlusX512DescriptionClose" type="button" class="secondary">Закрыть</button>
+    </div>
+    <ol>
+      <li>Стратегия ждёт 20 последовательных результатов меньше либо равных 5.12.</li>
+      <li>На 18/20 автообновление приостанавливается, а интерфейс заранее готовится.</li>
+      <li>На 20/20 ставка размещается со следующего раунда с фиксированным кэшаутом 5.12.</li>
+      <li>Цикл завершается победой при результате строго выше 5.12 или стопом после проигрыша на 11-м шаге.</li>
+      <li>Каждая следующая ставка покрывает накопленный минус и даёт чистую прибыль не меньше стартовой ставки цикла.</li>
+      <li>Стартовый депозит должен покрывать три полных стопа. При базе 0.20 один стоп равен 4.47, поэтому минимальный депозит равен 13.41.</li>
+      <li>После нажатия OK расширение выбирает максимальную стартовую ставку с шагом 0.01, для которой полный стоп не превышает треть указанного депозита.</li>
+      <li>Стартовая ставка не реинвестируется автоматически и меняется только после применения нового стартового депозита.</li>
     </ol>
   </dialog>
 

@@ -35,6 +35,7 @@ async function createRuntime({
   strategyId = 'ten-plus-x340',
   strategyName = '10+ - x3.40',
   target = 3.40,
+  initialBet = 0.20,
   signalLength = 10,
   pauseAt = 8,
   minimumDeposit = null,
@@ -57,6 +58,7 @@ async function createRuntime({
     strategyId,
     strategyName,
     target,
+    initialBet,
     signalLength,
     pauseAt,
     minimumDeposit,
@@ -129,6 +131,7 @@ async function createRuntime({
                     id: runtimeSettings.strategyId,
                     name: runtimeSettings.strategyName,
                     target: runtimeSettings.target,
+                    initialBet: runtimeSettings.initialBet,
                     signalLength: runtimeSettings.signalLength,
                     pauseAt: runtimeSettings.pauseAt,
                     stopStep: runtimeSettings.stopStep,
@@ -477,6 +480,52 @@ async function createRuntime({
   assert.strictEqual(x512Progression.recordedCycles[0].pnl, -13.7);
   assert.strictEqual(x512Progression.getState().strategyBalance, 0.30);
   assert.strictEqual(x512Progression.getState().minimumDeposit, 14);
+
+  const x512Twenty = await createRuntime({
+    strategyId: 'twenty-plus-x512',
+    strategyName: '20+ - x5.12',
+    target: 5.12,
+    initialBet: 0.30,
+    signalLength: 20,
+    pauseAt: 18,
+    stopStep: 11,
+    minimumDeposit: 13.41,
+    startingDeposit: 20,
+    notifyLength: 18
+  });
+  await x512Twenty.snapshot(makeSnapshot(17, 't', 6.0));
+  assert.strictEqual(x512Twenty.actions.length, 0, '17/20 must not prepare');
+  assert.strictEqual(x512Twenty.getState().minimumDeposit, 13.41);
+  assert.strictEqual(x512Twenty.getState().startingDeposit, 20);
+
+  await x512Twenty.snapshot(makeSnapshot(18, 't', 6.0));
+  assert.deepStrictEqual(x512Twenty.actions.map((item) => item.type), ['PREPARE']);
+  assert.strictEqual(x512Twenty.actions.at(-1).settings.bet, 0.30);
+  assert.strictEqual(x512Twenty.actions.at(-1).settings.cashout, 5.12);
+
+  await x512Twenty.snapshot(makeSnapshot(19, 't', 6.0));
+  await x512Twenty.snapshot(makeSnapshot(20, 't', 6.0));
+  assert.strictEqual(x512Twenty.getState().awaitingResult, true);
+  assert.strictEqual(x512Twenty.getState().activeBet, 0.30);
+  assert.strictEqual(
+    x512Twenty.getState().configSignature,
+    'twenty-plus-x512|11|0|20|deposit-v2'
+  );
+
+  const x512TwentyLosses = makeSnapshot(20, 't', 6.0);
+  for (let lossNumber = 1; lossNumber <= 11; lossNumber += 1) {
+    x512TwentyLosses.values.unshift(1.2);
+    x512TwentyLosses.ids.unshift(`t${20 + lossNumber}`);
+    await x512Twenty.snapshot(x512TwentyLosses);
+  }
+  const x512TwentyPlacedBets = x512Twenty.actions
+    .filter((item) => item.type === 'PREPARE_AND_BET')
+    .map((item) => item.settings.bet);
+  assert.deepStrictEqual(x512TwentyPlacedBets, [
+    0.30, 0.30, 0.30, 0.30, 0.37, 0.46, 0.57, 0.71, 0.88, 1.09, 1.36
+  ]);
+  assert.strictEqual(x512Twenty.getState().stoppedCycles, 1);
+  assert.strictEqual(x512Twenty.recordedCycles.at(-1).pnl, -6.64);
 
   const x512Reinvestment = await createRuntime({
     strategyId: 'fifteen-plus-x512',

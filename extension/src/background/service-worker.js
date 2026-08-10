@@ -17,6 +17,7 @@ import {
 import {
   getSettings,
   normalizeStrategyStopStep,
+  normalizeTwentyPlusX512StartingDeposit,
   normalizeX512StartingDeposit,
   saveSettings
 } from "./settings-service.js";
@@ -244,6 +245,18 @@ async function getCaptureState(sender, message) {
     ),
     strategyFifteenPlusX512NotifySeriesLength: Number(
       settings.strategyFifteenPlusX512NotifySeriesLength || 13
+    ),
+    strategyTwentyPlusX512Enabled: Boolean(
+      settings.strategyTwentyPlusX512Enabled && aviatorTab
+    ),
+    strategyTwentyPlusX512StartingDeposit: Number(
+      settings.strategyTwentyPlusX512StartingDeposit || 13.41
+    ),
+    strategyTwentyPlusX512NotifySeriesEnabled: Boolean(
+      settings.strategyTwentyPlusX512NotifySeriesEnabled
+    ),
+    strategyTwentyPlusX512NotifySeriesLength: Number(
+      settings.strategyTwentyPlusX512NotifySeriesLength || 18
     ),
     telegramConfigured: Boolean(settings.telegramChatId),
     activeStrategy: aviatorTab ? activeStrategy : null,
@@ -501,9 +514,14 @@ async function saveExtensionSettings(partialSettings) {
   const previous = await getSettings();
   const normalizedPartial = { ...(partialSettings || {}) };
 
-  if (normalizedPartial.strategyFifteenPlusX512Enabled === true) {
+  if (normalizedPartial.strategyTwentyPlusX512Enabled === true) {
+    normalizedPartial.strategyFifteenPlusX512Enabled = false;
+    normalizedPartial.strategyTenPlusX340Enabled = false;
+  } else if (normalizedPartial.strategyFifteenPlusX512Enabled === true) {
+    normalizedPartial.strategyTwentyPlusX512Enabled = false;
     normalizedPartial.strategyTenPlusX340Enabled = false;
   } else if (normalizedPartial.strategyTenPlusX340Enabled === true) {
+    normalizedPartial.strategyTwentyPlusX512Enabled = false;
     normalizedPartial.strategyFifteenPlusX512Enabled = false;
   }
 
@@ -523,7 +541,15 @@ async function saveExtensionSettings(partialSettings) {
       ? normalizeX512StartingDeposit(
           normalizedPartial.strategyFifteenPlusX512StartingDeposit
         )
-      : previous.strategyFifteenPlusX512StartingDeposit
+      : previous.strategyFifteenPlusX512StartingDeposit,
+    strategyTwentyPlusX512StartingDeposit: Object.prototype.hasOwnProperty.call(
+      normalizedPartial,
+      "strategyTwentyPlusX512StartingDeposit"
+    )
+      ? normalizeTwentyPlusX512StartingDeposit(
+          normalizedPartial.strategyTwentyPlusX512StartingDeposit
+        )
+      : previous.strategyTwentyPlusX512StartingDeposit
   };
 
   const criticalChangeRequested = hasCriticalStrategyChange(previous, requested);
@@ -571,7 +597,9 @@ function hasCriticalStrategyChange(left, right) {
     "strategyTenPlusX340ReinvestmentEnabled",
     "strategyFifteenPlusX512Enabled",
     "strategyFifteenPlusX512ReinvestmentEnabled",
-    "strategyFifteenPlusX512StartingDeposit"
+    "strategyFifteenPlusX512StartingDeposit",
+    "strategyTwentyPlusX512Enabled",
+    "strategyTwentyPlusX512StartingDeposit"
   ];
   return keys.some((key) => left?.[key] !== right?.[key]);
 }

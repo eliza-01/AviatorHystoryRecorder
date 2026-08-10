@@ -743,10 +743,15 @@
     }
 
     const state = strategyRuntimeState || {};
-    const calculatedMinimum = calculateMinimumStartingDeposit(
-      strategyStopStep,
-      Number(activeStrategyConfig?.target || DEFAULT_STRATEGY_TARGET)
-    );
+    const configuredMinimum = Number(activeStrategyConfig?.minimumDeposit);
+    const calculatedMinimum =
+      Number.isFinite(configuredMinimum) && configuredMinimum > 0
+        ? configuredMinimum
+        : calculateMinimumStartingDeposit(
+            strategyStopStep,
+            Number(activeStrategyConfig?.target || DEFAULT_STRATEGY_TARGET),
+            Number(activeStrategyConfig?.initialBet || STRATEGY_INITIAL_BET)
+          );
     const stateMinimum = Number(state.minimumDeposit);
     const minimumDeposit = Number.isFinite(stateMinimum) && stateMinimum > 0
       ? stateMinimum
@@ -844,22 +849,27 @@
 
   function calculateMinimumStartingDeposit(
     stopStep,
-    target = DEFAULT_STRATEGY_TARGET
+    target = DEFAULT_STRATEGY_TARGET,
+    initialBet = STRATEGY_INITIAL_BET
   ) {
     const normalizedStop = Math.max(0, Math.round(Number(stopStep) || 0));
     if (normalizedStop <= 0) {
       return 0;
     }
 
+    const normalizedInitialBet = Math.max(
+      STRATEGY_BET_STEP,
+      roundBadgeMoney(Number(initialBet) || STRATEGY_INITIAL_BET)
+    );
     let cumulativeLoss = 0;
-    let bet = STRATEGY_INITIAL_BET;
+    let bet = normalizedInitialBet;
     for (let step = 1; step <= normalizedStop; step += 1) {
       cumulativeLoss = roundBadgeMoney(cumulativeLoss + bet);
       if (step < normalizedStop) {
         const raw =
-          (cumulativeLoss + STRATEGY_INITIAL_BET) / (target - 1);
+          (cumulativeLoss + normalizedInitialBet) / (target - 1);
         bet = Math.max(
-          STRATEGY_INITIAL_BET,
+          normalizedInitialBet,
           ceilBadgeToStep(raw, STRATEGY_BET_STEP)
         );
       }
