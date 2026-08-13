@@ -15,6 +15,8 @@ const X512_MINIMUM_DEPOSIT = 14;
 const X512_MAXIMUM_DEPOSIT = 1_400_000;
 const X512_20_MINIMUM_DEPOSIT = 13.41;
 const X512_20_MAXIMUM_DEPOSIT = 10_000_000;
+const X1436_MINIMUM_DEPOSIT = 25;
+const X1436_MAXIMUM_DEPOSIT = 10_000_000;
 
 export async function getSettings() {
   const stored = await chrome.storage.local.get(STORAGE_KEYS.settings);
@@ -169,6 +171,19 @@ export function normalizeTwentyPlusX512StartingDeposit(value) {
   return Math.round((bounded + Number.EPSILON) * 100) / 100;
 }
 
+export function normalizeFortyThreePlusX1436StartingDeposit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SETTINGS.strategyFortyThreePlusX1436StartingDeposit;
+  }
+
+  const bounded = Math.min(
+    X1436_MAXIMUM_DEPOSIT,
+    Math.max(X1436_MINIMUM_DEPOSIT, parsed)
+  );
+  return Math.round((bounded + Number.EPSILON) * 100) / 100;
+}
+
 function sanitizeSettings(value) {
   const settings = {
     ...DEFAULT_SETTINGS,
@@ -253,9 +268,30 @@ function sanitizeSettings(value) {
       DEFAULT_SETTINGS.strategyTwentyPlusX512NotifySeriesLength
     );
 
+  settings.strategyFortyThreePlusX1436Enabled = Boolean(
+    settings.strategyFortyThreePlusX1436Enabled
+  );
+  settings.strategyFortyThreePlusX1436StartingDeposit =
+    normalizeFortyThreePlusX1436StartingDeposit(
+      settings.strategyFortyThreePlusX1436StartingDeposit
+    );
+  settings.strategyFortyThreePlusX1436NotifySeriesEnabled = Boolean(
+    settings.strategyFortyThreePlusX1436NotifySeriesEnabled
+  );
+  settings.strategyFortyThreePlusX1436NotifySeriesLength =
+    normalizeStrategySeriesLength(
+      settings.strategyFortyThreePlusX1436NotifySeriesLength,
+      43,
+      DEFAULT_SETTINGS.strategyFortyThreePlusX1436NotifySeriesLength
+    );
+
   // Одновременно интерфейсом ставки может управлять только одна стратегия.
-  // При конфликте приоритет получает 20+ - x5.12, затем 15+ - x5.12.
-  if (settings.strategyTwentyPlusX512Enabled) {
+  // При конфликте приоритет получает 43+ - x14.36, затем 20+ - x5.12 и 15+ - x5.12.
+  if (settings.strategyFortyThreePlusX1436Enabled) {
+    settings.strategyTwentyPlusX512Enabled = false;
+    settings.strategyFifteenPlusX512Enabled = false;
+    settings.strategyTenPlusX340Enabled = false;
+  } else if (settings.strategyTwentyPlusX512Enabled) {
     settings.strategyFifteenPlusX512Enabled = false;
     settings.strategyTenPlusX340Enabled = false;
   } else if (
@@ -281,7 +317,8 @@ function sanitizeSettings(value) {
   if (
     settings.strategyTenPlusX340Enabled ||
     settings.strategyFifteenPlusX512Enabled ||
-    settings.strategyTwentyPlusX512Enabled
+    settings.strategyTwentyPlusX512Enabled ||
+    settings.strategyFortyThreePlusX1436Enabled
   ) {
     settings.preparationEnabled = false;
   }

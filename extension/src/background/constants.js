@@ -24,7 +24,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   strategyTwentyPlusX512Enabled: false,
   strategyTwentyPlusX512StartingDeposit: 13.41,
   strategyTwentyPlusX512NotifySeriesEnabled: false,
-  strategyTwentyPlusX512NotifySeriesLength: 18
+  strategyTwentyPlusX512NotifySeriesLength: 18,
+  strategyFortyThreePlusX1436Enabled: false,
+  strategyFortyThreePlusX1436StartingDeposit: 25,
+  strategyFortyThreePlusX1436NotifySeriesEnabled: false,
+  strategyFortyThreePlusX1436NotifySeriesLength: 41
 });
 
 export const STORAGE_KEYS = Object.freeze({

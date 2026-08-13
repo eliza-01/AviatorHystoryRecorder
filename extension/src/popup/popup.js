@@ -105,6 +105,51 @@ const elements = {
   strategyStatusX512Twenty: document.querySelector("#strategyStatusX512Twenty"),
   strategyStatisticsX512Twenty: document.querySelector("#strategyStatisticsX512Twenty"),
   strategyResetStatisticsX512Twenty: document.querySelector("#strategyResetStatisticsX512Twenty"),
+  strategyFortyThreePlusX1436Enabled: document.querySelector(
+    "#strategyFortyThreePlusX1436Enabled"
+  ),
+  strategyFortyThreePlusX1436StartingDeposit: document.querySelector(
+    "#strategyFortyThreePlusX1436StartingDeposit"
+  ),
+  strategyFortyThreePlusX1436ApplyDeposit: document.querySelector(
+    "#strategyFortyThreePlusX1436ApplyDeposit"
+  ),
+  strategyFortyThreePlusX1436DepositNote: document.querySelector(
+    "#strategyFortyThreePlusX1436DepositNote"
+  ),
+  strategyFortyThreePlusX1436StopDetails: document.querySelector(
+    "#strategyFortyThreePlusX1436StopDetails"
+  ),
+  strategyFortyThreePlusX1436Steps: document.querySelector(
+    "#strategyFortyThreePlusX1436Steps"
+  ),
+  strategyFortyThreePlusX1436NotifySeriesEnabled: document.querySelector(
+    "#strategyFortyThreePlusX1436NotifySeriesEnabled"
+  ),
+  strategyFortyThreePlusX1436NotifySeriesLength: document.querySelector(
+    "#strategyFortyThreePlusX1436NotifySeriesLength"
+  ),
+  strategyFortyThreePlusX1436Description: document.querySelector(
+    "#strategyFortyThreePlusX1436Description"
+  ),
+  strategyFortyThreePlusX1436DescriptionDialog: document.querySelector(
+    "#strategyFortyThreePlusX1436DescriptionDialog"
+  ),
+  strategyFortyThreePlusX1436DescriptionClose: document.querySelector(
+    "#strategyFortyThreePlusX1436DescriptionClose"
+  ),
+  strategyFortyThreePlusX1436Historical: document.querySelector(
+    "#strategyFortyThreePlusX1436Historical"
+  ),
+  strategyFortyThreePlusX1436HistoricalDialog: document.querySelector(
+    "#strategyFortyThreePlusX1436HistoricalDialog"
+  ),
+  strategyFortyThreePlusX1436HistoricalClose: document.querySelector(
+    "#strategyFortyThreePlusX1436HistoricalClose"
+  ),
+  strategyStatusX1436: document.querySelector("#strategyStatusX1436"),
+  strategyStatisticsX1436: document.querySelector("#strategyStatisticsX1436"),
+  strategyResetStatisticsX1436: document.querySelector("#strategyResetStatisticsX1436"),
   preparationEnabled: document.querySelector("#preparationEnabled"),
   preparationBet: document.querySelector("#preparationBet"),
   preparationCashout: document.querySelector("#preparationCashout"),
@@ -167,6 +212,16 @@ const X512_20_STRATEGY_STOP_STEP = 11;
 const X512_20_STRATEGY_MINIMUM_DEPOSIT = 13.41;
 const X512_20_STOP_RESERVE_MULTIPLIER = 3;
 const X512_20_MAXIMUM_DEPOSIT = 10_000_000;
+const X1436_STRATEGY_ID = "forty-three-plus-x1436";
+const X1436_STRATEGY_TARGET = 14.36;
+const X1436_STRATEGY_SIGNAL_LENGTH = 43;
+const X1436_STRATEGY_PAUSE_AT = 41;
+const X1436_STRATEGY_STOP_STEP = 18;
+const X1436_STRATEGY_MINIMUM_DEPOSIT = 25;
+const X1436_BASE_FULL_STOP = 3.85;
+const X1436_STOP_RESERVE_MULTIPLIER =
+  X1436_STRATEGY_MINIMUM_DEPOSIT / X1436_BASE_FULL_STOP;
+const X1436_MAXIMUM_DEPOSIT = 10_000_000;
 const BADGE_SETTINGS_AUTOSAVE_DELAY_MS = 80;
 
 const PREPARATION_STAGE_LABELS = {
@@ -187,6 +242,7 @@ let currentStrategyState = null;
 let badgeSettingsAutosaveTimer = null;
 let badgeSettingsAutosaveSequence = 0;
 let appliedX512TwentyStartingDeposit = X512_20_STRATEGY_MINIMUM_DEPOSIT;
+let appliedX1436StartingDeposit = X1436_STRATEGY_MINIMUM_DEPOSIT;
 
 populateStopOptions();
 
@@ -207,6 +263,9 @@ const settingsElements = [
   elements.strategyTwentyPlusX512Enabled,
   elements.strategyTwentyPlusX512NotifySeriesEnabled,
   elements.strategyTwentyPlusX512NotifySeriesLength,
+  elements.strategyFortyThreePlusX1436Enabled,
+  elements.strategyFortyThreePlusX1436NotifySeriesEnabled,
+  elements.strategyFortyThreePlusX1436NotifySeriesLength,
   elements.preparationEnabled,
   elements.preparationBet,
   elements.preparationCashout,
@@ -287,6 +346,31 @@ elements.strategyTwentyPlusX512ApplyDeposit.addEventListener(
   "click",
   () => void applyX512TwentyStartingDeposit()
 );
+elements.strategyFortyThreePlusX1436Enabled.addEventListener(
+  "change",
+  () => handleStrategyToggle("x1436")
+);
+elements.strategyFortyThreePlusX1436NotifySeriesEnabled.addEventListener(
+  "change",
+  syncStrategyNotificationFields
+);
+elements.strategyFortyThreePlusX1436StartingDeposit.addEventListener(
+  "input",
+  renderX1436DepositDraft
+);
+elements.strategyFortyThreePlusX1436StartingDeposit.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void applyX1436StartingDeposit();
+    }
+  }
+);
+elements.strategyFortyThreePlusX1436ApplyDeposit.addEventListener(
+  "click",
+  () => void applyX1436StartingDeposit()
+);
 elements.preparationEnabled.addEventListener("change", syncPreparationFields);
 elements.pageAutoReloadEnabled.addEventListener("change", syncReloadFields);
 elements.strategyDescription.addEventListener("click", openStrategyDescription);
@@ -339,6 +423,41 @@ elements.strategyTwentyPlusX512DescriptionDialog.addEventListener(
 );
 elements.strategyResetStatisticsX512Twenty.addEventListener("click", () => {
   void resetPersistentStrategyStatistics(X512_20_STRATEGY_ID);
+});
+elements.strategyFortyThreePlusX1436Description.addEventListener(
+  "click",
+  openX1436StrategyDescription
+);
+elements.strategyFortyThreePlusX1436DescriptionClose.addEventListener(
+  "click",
+  closeX1436StrategyDescription
+);
+elements.strategyFortyThreePlusX1436DescriptionDialog.addEventListener(
+  "click",
+  (event) => {
+    if (event.target === elements.strategyFortyThreePlusX1436DescriptionDialog) {
+      closeX1436StrategyDescription();
+    }
+  }
+);
+elements.strategyFortyThreePlusX1436Historical.addEventListener(
+  "click",
+  openX1436HistoricalData
+);
+elements.strategyFortyThreePlusX1436HistoricalClose.addEventListener(
+  "click",
+  closeX1436HistoricalData
+);
+elements.strategyFortyThreePlusX1436HistoricalDialog.addEventListener(
+  "click",
+  (event) => {
+    if (event.target === elements.strategyFortyThreePlusX1436HistoricalDialog) {
+      closeX1436HistoricalData();
+    }
+  }
+);
+elements.strategyResetStatisticsX1436.addEventListener("click", () => {
+  void resetPersistentStrategyStatistics(X1436_STRATEGY_ID);
 });
 for (const toggle of document.querySelectorAll(".strategy-summary-toggle")) {
   toggle.addEventListener("click", (event) => event.stopPropagation());
@@ -444,6 +563,22 @@ function render(response) {
       settings.strategyTwentyPlusX512NotifySeriesLength || X512_20_STRATEGY_PAUSE_AT
     );
     renderX512TwentyCalculations(appliedX512TwentyStartingDeposit);
+    elements.strategyFortyThreePlusX1436Enabled.checked = Boolean(
+      settings.strategyFortyThreePlusX1436Enabled
+    );
+    appliedX1436StartingDeposit = normalizeX1436StartingDeposit(
+      settings.strategyFortyThreePlusX1436StartingDeposit
+    ) || X1436_STRATEGY_MINIMUM_DEPOSIT;
+    elements.strategyFortyThreePlusX1436StartingDeposit.value = formatMoneyInput(
+      appliedX1436StartingDeposit
+    );
+    elements.strategyFortyThreePlusX1436NotifySeriesEnabled.checked = Boolean(
+      settings.strategyFortyThreePlusX1436NotifySeriesEnabled
+    );
+    elements.strategyFortyThreePlusX1436NotifySeriesLength.value = String(
+      settings.strategyFortyThreePlusX1436NotifySeriesLength || X1436_STRATEGY_PAUSE_AT
+    );
+    renderX1436Calculations(appliedX1436StartingDeposit);
     elements.preparationEnabled.checked = Boolean(settings.preparationEnabled);
     elements.preparationBet.value = String(settings.preparationBet ?? 1);
     elements.preparationCashout.value = String(settings.preparationCashout ?? 2);
@@ -465,6 +600,7 @@ function render(response) {
     syncStrategyFields();
     syncX512StrategyFields();
     syncX512TwentyStrategyFields();
+    syncX1436StrategyFields();
     syncPreparationFields();
     syncReloadFields();
   }
@@ -541,6 +677,7 @@ function renderStrategyStatuses(strategy, settings) {
     strategy,
     strategyId: STRATEGY_ID,
     name: "10+ - x3.40",
+    target: STRATEGY_TARGET,
     signalLength: 10,
     stopStep: Number(settings?.strategyTenPlusX340StopStep || 0),
     reinvestmentEnabled: Boolean(
@@ -567,6 +704,7 @@ function renderStrategyStatuses(strategy, settings) {
     strategy,
     strategyId: X512_STRATEGY_ID,
     name: "15+ - x5.12",
+    target: X512_STRATEGY_TARGET,
     signalLength: X512_STRATEGY_SIGNAL_LENGTH,
     stopStep: X512_STRATEGY_STOP_STEP,
     reinvestmentEnabled: Boolean(
@@ -587,6 +725,7 @@ function renderStrategyStatuses(strategy, settings) {
     strategy,
     strategyId: X512_20_STRATEGY_ID,
     name: "20+ - x5.12",
+    target: X512_20_STRATEGY_TARGET,
     signalLength: X512_20_STRATEGY_SIGNAL_LENGTH,
     stopStep: X512_20_STRATEGY_STOP_STEP,
     reinvestmentEnabled: false,
@@ -594,6 +733,25 @@ function renderStrategyStatuses(strategy, settings) {
     startingDeposit: x512TwentyStartingDeposit,
     reinvestmentStep: 0,
     displayedInitialBet: getX512TwentyInitialBet(x512TwentyStartingDeposit)
+  });
+
+  const x1436StartingDeposit = normalizeX1436StartingDeposit(
+    settings?.strategyFortyThreePlusX1436StartingDeposit
+  ) || X1436_STRATEGY_MINIMUM_DEPOSIT;
+  renderSingleStrategyStatus({
+    element: elements.strategyStatusX1436,
+    enabled: Boolean(settings?.strategyFortyThreePlusX1436Enabled),
+    strategy,
+    strategyId: X1436_STRATEGY_ID,
+    name: "43+ - x14.36",
+    target: X1436_STRATEGY_TARGET,
+    signalLength: X1436_STRATEGY_SIGNAL_LENGTH,
+    stopStep: X1436_STRATEGY_STOP_STEP,
+    reinvestmentEnabled: false,
+    minimumDeposit: X1436_STRATEGY_MINIMUM_DEPOSIT,
+    startingDeposit: x1436StartingDeposit,
+    reinvestmentStep: 0,
+    displayedInitialBet: getX1436InitialBet(x1436StartingDeposit)
   });
 }
 
@@ -603,6 +761,7 @@ function renderSingleStrategyStatus({
   strategy,
   strategyId,
   name,
+  target,
   signalLength,
   stopStep,
   reinvestmentEnabled,
@@ -629,7 +788,7 @@ function renderSingleStrategyStatus({
   const stopDetails = getStrategyStopStepDetails(
     stopStep,
     displayedInitialBet,
-    strategyId === STRATEGY_ID ? STRATEGY_TARGET : X512_STRATEGY_TARGET
+    target
   );
   const stopSuffix = stopDetails
     ? ` · стоп: шаг ${stopDetails.step}, ставка ${formatMoney(
@@ -692,6 +851,10 @@ function renderPersistentStrategyStatistics(statisticsByStrategy) {
   renderSinglePersistentStatistics(
     elements.strategyStatisticsX512Twenty,
     source[X512_20_STRATEGY_ID]
+  );
+  renderSinglePersistentStatistics(
+    elements.strategyStatisticsX1436,
+    source[X1436_STRATEGY_ID]
   );
 }
 
@@ -756,7 +919,8 @@ function renderPreparationStatus(preparation, settings) {
   const strategyEnabled = Boolean(
     settings?.strategyTenPlusX340Enabled ||
     settings?.strategyFifteenPlusX512Enabled ||
-    settings?.strategyTwentyPlusX512Enabled
+    settings?.strategyTwentyPlusX512Enabled ||
+    settings?.strategyFortyThreePlusX1436Enabled
   );
   if (strategyEnabled) {
     elements.preparationStatus.textContent =
@@ -888,6 +1052,10 @@ async function save() {
     elements.strategyTwentyPlusX512NotifySeriesLength.value,
     X512_20_STRATEGY_SIGNAL_LENGTH
   );
+  const x1436SeriesLength = normalizeSeriesLength(
+    elements.strategyFortyThreePlusX1436NotifySeriesLength.value,
+    X1436_STRATEGY_SIGNAL_LENGTH
+  );
   const x512StartingDeposit = normalizeX512StartingDeposit(
     elements.strategyFifteenPlusX512StartingDeposit.value
   );
@@ -961,6 +1129,12 @@ async function save() {
     return false;
   }
 
+  if (x1436SeriesLength === null) {
+    setStatus("Длина серии 43+ / x14.36 должна быть от 1 до 43", true);
+    elements.strategyFortyThreePlusX1436NotifySeriesLength.focus();
+    return false;
+  }
+
   if (x512StartingDeposit === null) {
     setStatus("Стартовый депозит x5.12 должен быть кратен 14", true);
     elements.strategyFifteenPlusX512StartingDeposit.focus();
@@ -978,6 +1152,8 @@ async function save() {
     elements.strategyFifteenPlusX512Enabled.checked;
   const x512TwentyStrategyEnabled =
     elements.strategyTwentyPlusX512Enabled.checked;
+  const x1436StrategyEnabled =
+    elements.strategyFortyThreePlusX1436Enabled.checked;
   const reinvestmentEnabled =
     elements.strategyTenPlusX340ReinvestmentEnabled.checked;
   const x512ReinvestmentEnabled =
@@ -988,9 +1164,11 @@ async function save() {
     elements.strategyFifteenPlusX512NotifySeriesEnabled.checked;
   const x512TwentyNotifySeriesEnabled =
     elements.strategyTwentyPlusX512NotifySeriesEnabled.checked;
+  const x1436NotifySeriesEnabled =
+    elements.strategyFortyThreePlusX1436NotifySeriesEnabled.checked;
 
   if (
-    [strategyEnabled, x512StrategyEnabled, x512TwentyStrategyEnabled]
+    [strategyEnabled, x512StrategyEnabled, x512TwentyStrategyEnabled, x1436StrategyEnabled]
       .filter(Boolean).length > 1
   ) {
     setStatus("Одновременно можно включить только одну стратегию", true);
@@ -1014,6 +1192,23 @@ async function save() {
     }
   }
 
+  if (x1436StrategyEnabled) {
+    const draftDeposit = normalizeX1436StartingDeposit(
+      elements.strategyFortyThreePlusX1436StartingDeposit.value
+    );
+    if (
+      draftDeposit === null ||
+      Math.abs(draftDeposit - appliedX1436StartingDeposit) >= 0.005
+    ) {
+      setStatus(
+        "Для 43+ / x14.36 сначала примените стартовый депозит кнопкой OK",
+        true
+      );
+      elements.strategyFortyThreePlusX1436StartingDeposit.focus();
+      return false;
+    }
+  }
+
   if (reinvestmentEnabled && strategyStopStep <= 0) {
     setStatus(
       "Для реинвестирования выберите конечный шаг стопа",
@@ -1024,7 +1219,7 @@ async function save() {
   }
 
   if (
-    (notifySeriesEnabled || x512NotifySeriesEnabled || x512TwentyNotifySeriesEnabled) &&
+    (notifySeriesEnabled || x512NotifySeriesEnabled || x512TwentyNotifySeriesEnabled || x1436NotifySeriesEnabled) &&
     !telegramChatId
   ) {
     setStatus("Для уведомления о серии укажите Telegram ID", true);
@@ -1061,8 +1256,12 @@ async function save() {
       strategyTwentyPlusX512StartingDeposit: appliedX512TwentyStartingDeposit,
       strategyTwentyPlusX512NotifySeriesEnabled: x512TwentyNotifySeriesEnabled,
       strategyTwentyPlusX512NotifySeriesLength: x512TwentySeriesLength,
+      strategyFortyThreePlusX1436Enabled: x1436StrategyEnabled,
+      strategyFortyThreePlusX1436StartingDeposit: appliedX1436StartingDeposit,
+      strategyFortyThreePlusX1436NotifySeriesEnabled: x1436NotifySeriesEnabled,
+      strategyFortyThreePlusX1436NotifySeriesLength: x1436SeriesLength,
       preparationEnabled:
-        strategyEnabled || x512StrategyEnabled || x512TwentyStrategyEnabled
+        strategyEnabled || x512StrategyEnabled || x512TwentyStrategyEnabled || x1436StrategyEnabled
           ? false
           : elements.preparationEnabled.checked,
       preparationBet,
@@ -1155,6 +1354,7 @@ function handleStrategyToggle(strategyKey) {
   if (strategyKey === "x340" && elements.strategyTenPlusX340Enabled.checked) {
     elements.strategyFifteenPlusX512Enabled.checked = false;
     elements.strategyTwentyPlusX512Enabled.checked = false;
+    elements.strategyFortyThreePlusX1436Enabled.checked = false;
   }
   if (
     strategyKey === "x512" &&
@@ -1162,6 +1362,7 @@ function handleStrategyToggle(strategyKey) {
   ) {
     elements.strategyTenPlusX340Enabled.checked = false;
     elements.strategyTwentyPlusX512Enabled.checked = false;
+    elements.strategyFortyThreePlusX1436Enabled.checked = false;
   }
   if (
     strategyKey === "x51220" &&
@@ -1169,11 +1370,21 @@ function handleStrategyToggle(strategyKey) {
   ) {
     elements.strategyTenPlusX340Enabled.checked = false;
     elements.strategyFifteenPlusX512Enabled.checked = false;
+    elements.strategyFortyThreePlusX1436Enabled.checked = false;
+  }
+  if (
+    strategyKey === "x1436" &&
+    elements.strategyFortyThreePlusX1436Enabled.checked
+  ) {
+    elements.strategyTenPlusX340Enabled.checked = false;
+    elements.strategyFifteenPlusX512Enabled.checked = false;
+    elements.strategyTwentyPlusX512Enabled.checked = false;
   }
 
   syncStrategyFields();
   syncX512StrategyFields();
   syncX512TwentyStrategyFields();
+  syncX1436StrategyFields();
   syncPreparationFields();
 }
 
@@ -1331,6 +1542,162 @@ function normalizeX512TwentyStartingDeposit(value) {
     !Number.isFinite(parsed) ||
     parsed < X512_20_STRATEGY_MINIMUM_DEPOSIT ||
     parsed > X512_20_MAXIMUM_DEPOSIT
+  ) {
+    return null;
+  }
+  return roundToCent(parsed);
+}
+
+function renderX1436DepositDraft() {
+  const deposit = normalizeX1436StartingDeposit(
+    elements.strategyFortyThreePlusX1436StartingDeposit.value
+  );
+  if (deposit === null) {
+    elements.strategyFortyThreePlusX1436DepositNote.textContent =
+      `Минимальный депозит — ${formatMoney(X1436_STRATEGY_MINIMUM_DEPOSIT)}. ` +
+      `Допустимый диапазон: ${formatMoney(X1436_STRATEGY_MINIMUM_DEPOSIT)}–${formatMoney(X1436_MAXIMUM_DEPOSIT)}.`;
+    return;
+  }
+
+  const isPreview =
+    Math.abs(deposit - appliedX1436StartingDeposit) >= 0.005;
+  renderX1436Calculations(deposit, isPreview);
+}
+
+async function applyX1436StartingDeposit() {
+  const deposit = normalizeX1436StartingDeposit(
+    elements.strategyFortyThreePlusX1436StartingDeposit.value
+  );
+  if (deposit === null) {
+    setStatus(
+      `Стартовый депозит 43+ / x14.36 должен быть от ${formatMoney(
+        X1436_STRATEGY_MINIMUM_DEPOSIT
+      )} до ${formatMoney(X1436_MAXIMUM_DEPOSIT)}`,
+      true
+    );
+    elements.strategyFortyThreePlusX1436StartingDeposit.focus();
+    return;
+  }
+
+  setStatus("Применение депозита…");
+  const response = await chrome.runtime.sendMessage({
+    type: "SAVE_SETTINGS",
+    settings: {
+      strategyFortyThreePlusX1436StartingDeposit: deposit
+    }
+  });
+  if (!response?.ok) {
+    setStatus(response?.error || "Не удалось применить депозит", true);
+    return;
+  }
+
+  appliedX1436StartingDeposit = normalizeX1436StartingDeposit(
+    response.settings?.strategyFortyThreePlusX1436StartingDeposit
+  ) || deposit;
+  elements.strategyFortyThreePlusX1436StartingDeposit.value = formatMoneyInput(
+    appliedX1436StartingDeposit
+  );
+  renderX1436Calculations(appliedX1436StartingDeposit);
+  setStatus(
+    `Депозит ${formatMoney(appliedX1436StartingDeposit)} применён`,
+    false,
+    true
+  );
+}
+
+function renderX1436Calculations(
+  startingDeposit = appliedX1436StartingDeposit,
+  isPreview = false
+) {
+  const deposit =
+    normalizeX1436StartingDeposit(startingDeposit) ||
+    X1436_STRATEGY_MINIMUM_DEPOSIT;
+  const initialBet = getX1436InitialBet(deposit);
+  const progression = getStrategyProgression(
+    X1436_STRATEGY_STOP_STEP,
+    initialBet,
+    X1436_STRATEGY_TARGET
+  );
+  const details = getStrategyStopStepDetails(
+    X1436_STRATEGY_STOP_STEP,
+    initialBet,
+    X1436_STRATEGY_TARGET
+  );
+  const stopBudget = roundToFour(deposit / X1436_STOP_RESERVE_MULTIPLIER);
+  const riskPercent = roundToFour((details.cumulativeLoss / deposit) * 100);
+
+  elements.strategyFortyThreePlusX1436StopDetails.textContent =
+    `Стартовая ставка ${formatMoney(initialBet)} · ` +
+    `полный стоп ${formatMoney(details.cumulativeLoss)} · ` +
+    `лимит полного стопа ${formatMoney(stopBudget)} · ` +
+    `риск стопа ${formatNumber(riskPercent)}% банка.`;
+  elements.strategyFortyThreePlusX1436DepositNote.textContent = isPreview
+    ? `Предпросмотр для ${formatMoney(deposit)}. Расчёт обновлён автоматически; ` +
+      `для применения нажмите OK. Сейчас применяется ${formatMoney(
+        appliedX1436StartingDeposit
+      )}.`
+    : `Применено ${formatMoney(deposit)}. При банке 25 базовая ставка 0.20; ` +
+      "при увеличении банка ставка растёт с шагом 0.01 при сохранении базовой доли риска полного стопа.";
+
+  const fragment = document.createDocumentFragment();
+  let lossBeforeStep = 0;
+  progression.forEach((bet, index) => {
+    const row = document.createElement("tr");
+    const cumulativeLoss = roundToCent(lossBeforeStep + bet);
+    const profitOnWin = roundToFour(
+      bet * (X1436_STRATEGY_TARGET - 1) - lossBeforeStep
+    );
+    for (const value of [
+      String(index + 1),
+      formatMoney(bet),
+      formatMoney(cumulativeLoss),
+      `+${formatMoney(profitOnWin)}`
+    ]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    fragment.append(row);
+    lossBeforeStep = cumulativeLoss;
+  });
+  elements.strategyFortyThreePlusX1436Steps.replaceChildren(fragment);
+}
+
+function getX1436InitialBet(startingDeposit) {
+  const deposit =
+    normalizeX1436StartingDeposit(startingDeposit) ||
+    X1436_STRATEGY_MINIMUM_DEPOSIT;
+  const stopBudget = deposit / X1436_STOP_RESERVE_MULTIPLIER;
+  const minimumBetCents = Math.round(STRATEGY_INITIAL_BET * 100);
+  let low = minimumBetCents;
+  let high = Math.max(minimumBetCents, Math.floor((stopBudget + 1e-9) * 100));
+  let best = minimumBetCents;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const bet = mid / 100;
+    const details = getStrategyStopStepDetails(
+      X1436_STRATEGY_STOP_STEP,
+      bet,
+      X1436_STRATEGY_TARGET
+    );
+    if (details.cumulativeLoss <= stopBudget + 1e-9) {
+      best = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return best / 100;
+}
+
+function normalizeX1436StartingDeposit(value) {
+  const parsed = Number(String(value ?? "").trim().replace(",", "."));
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < X1436_STRATEGY_MINIMUM_DEPOSIT ||
+    parsed > X1436_MAXIMUM_DEPOSIT
   ) {
     return null;
   }
@@ -1695,6 +2062,50 @@ function closeX512TwentyStrategyDescription() {
   }
 }
 
+function openX1436StrategyDescription() {
+  if (
+    typeof elements.strategyFortyThreePlusX1436DescriptionDialog.showModal ===
+    "function"
+  ) {
+    elements.strategyFortyThreePlusX1436DescriptionDialog.showModal();
+  } else {
+    elements.strategyFortyThreePlusX1436DescriptionDialog.setAttribute("open", "");
+  }
+}
+
+function closeX1436StrategyDescription() {
+  if (
+    typeof elements.strategyFortyThreePlusX1436DescriptionDialog.close ===
+    "function"
+  ) {
+    elements.strategyFortyThreePlusX1436DescriptionDialog.close();
+  } else {
+    elements.strategyFortyThreePlusX1436DescriptionDialog.removeAttribute("open");
+  }
+}
+
+function openX1436HistoricalData() {
+  if (
+    typeof elements.strategyFortyThreePlusX1436HistoricalDialog.showModal ===
+    "function"
+  ) {
+    elements.strategyFortyThreePlusX1436HistoricalDialog.showModal();
+  } else {
+    elements.strategyFortyThreePlusX1436HistoricalDialog.setAttribute("open", "");
+  }
+}
+
+function closeX1436HistoricalData() {
+  if (
+    typeof elements.strategyFortyThreePlusX1436HistoricalDialog.close ===
+    "function"
+  ) {
+    elements.strategyFortyThreePlusX1436HistoricalDialog.close();
+  } else {
+    elements.strategyFortyThreePlusX1436HistoricalDialog.removeAttribute("open");
+  }
+}
+
 function formatTime(value) {
   if (!value) {
     return "—";
@@ -1723,7 +2134,8 @@ function syncStrategyFields() {
   const anyStrategyEnabled = Boolean(
     strategyEnabled ||
     elements.strategyFifteenPlusX512Enabled.checked ||
-    elements.strategyTwentyPlusX512Enabled.checked
+    elements.strategyTwentyPlusX512Enabled.checked ||
+    elements.strategyFortyThreePlusX1436Enabled.checked
   );
   const stopStep = normalizeStopStep(
     elements.strategyTenPlusX340StopStep.value
@@ -1758,6 +2170,11 @@ function syncX512TwentyStrategyFields() {
   syncStrategyNotificationFields();
 }
 
+function syncX1436StrategyFields() {
+  renderX1436Calculations(appliedX1436StartingDeposit);
+  syncStrategyNotificationFields();
+}
+
 
 function syncStrategyNotificationFields() {
   const x340Enabled = elements.strategyTenPlusX340Enabled.checked;
@@ -1778,13 +2195,21 @@ function syncStrategyNotificationFields() {
   elements.strategyTwentyPlusX512NotifySeriesLength.disabled =
     !x512TwentyEnabled ||
     !elements.strategyTwentyPlusX512NotifySeriesEnabled.checked;
+
+  const x1436Enabled = elements.strategyFortyThreePlusX1436Enabled.checked;
+  elements.strategyFortyThreePlusX1436NotifySeriesEnabled.disabled =
+    !x1436Enabled;
+  elements.strategyFortyThreePlusX1436NotifySeriesLength.disabled =
+    !x1436Enabled ||
+    !elements.strategyFortyThreePlusX1436NotifySeriesEnabled.checked;
 }
 
 function syncPreparationFields() {
   const strategyEnabled = Boolean(
     elements.strategyTenPlusX340Enabled.checked ||
     elements.strategyFifteenPlusX512Enabled.checked ||
-    elements.strategyTwentyPlusX512Enabled.checked
+    elements.strategyTwentyPlusX512Enabled.checked ||
+    elements.strategyFortyThreePlusX1436Enabled.checked
   );
   const disabled = strategyEnabled || !elements.preparationEnabled.checked;
   elements.preparationEnabled.disabled = strategyEnabled;
@@ -1871,6 +2296,7 @@ function isEditingSettings() {
   return (
     settingsElements.includes(document.activeElement) ||
     badgeSettingsElements.includes(document.activeElement) ||
-    document.activeElement === elements.strategyTwentyPlusX512StartingDeposit
+    document.activeElement === elements.strategyTwentyPlusX512StartingDeposit ||
+    document.activeElement === elements.strategyFortyThreePlusX1436StartingDeposit
   );
 }

@@ -1,11 +1,16 @@
 export const STRATEGY_IDS = Object.freeze({
   tenPlusX340: "ten-plus-x340",
   fifteenPlusX512: "fifteen-plus-x512",
-  twentyPlusX512: "twenty-plus-x512"
+  twentyPlusX512: "twenty-plus-x512",
+  fortyThreePlusX1436: "forty-three-plus-x1436"
 });
 
 export const STRATEGY_BET_STEP = 0.01;
 export const STOP_RESERVE_MULTIPLIER = 3;
+export const X1436_MINIMUM_DEPOSIT = 25;
+export const X1436_BASE_FULL_STOP = 3.85;
+export const X1436_STOP_RESERVE_MULTIPLIER =
+  X1436_MINIMUM_DEPOSIT / X1436_BASE_FULL_STOP;
 
 export const STRATEGY_DEFINITIONS = Object.freeze({
   [STRATEGY_IDS.tenPlusX340]: Object.freeze({
@@ -51,17 +56,37 @@ export const STRATEGY_DEFINITIONS = Object.freeze({
     startingDepositKey: "strategyTwentyPlusX512StartingDeposit",
     notifySeriesEnabledKey: "strategyTwentyPlusX512NotifySeriesEnabled",
     notifySeriesLengthKey: "strategyTwentyPlusX512NotifySeriesLength"
+  }),
+  [STRATEGY_IDS.fortyThreePlusX1436]: Object.freeze({
+    id: STRATEGY_IDS.fortyThreePlusX1436,
+    name: "43+ - x14.36",
+    target: 14.36,
+    signalLength: 43,
+    pauseAt: 41,
+    initialBet: 0.20,
+    fixedStopStep: 18,
+    minimumDeposit: X1436_MINIMUM_DEPOSIT,
+    stopReserveMultiplier: X1436_STOP_RESERVE_MULTIPLIER,
+    depositScaledInitialBet: true,
+    enabledKey: "strategyFortyThreePlusX1436Enabled",
+    startingDepositKey: "strategyFortyThreePlusX1436StartingDeposit",
+    notifySeriesEnabledKey: "strategyFortyThreePlusX1436NotifySeriesEnabled",
+    notifySeriesLengthKey: "strategyFortyThreePlusX1436NotifySeriesLength"
   })
 });
 
 export function getActiveStrategyConfig(settings) {
   const source = settings && typeof settings === "object" ? settings : {};
+  const x1436FortyThree = STRATEGY_DEFINITIONS[STRATEGY_IDS.fortyThreePlusX1436];
   const x512Twenty = STRATEGY_DEFINITIONS[STRATEGY_IDS.twentyPlusX512];
   const x512Fifteen = STRATEGY_DEFINITIONS[STRATEGY_IDS.fifteenPlusX512];
   const x340 = STRATEGY_DEFINITIONS[STRATEGY_IDS.tenPlusX340];
 
   // sanitizeSettings устраняет конфликт. При старом/ручном хранилище
   // приоритет получает самая новая стратегия.
+  if (source[x1436FortyThree.enabledKey]) {
+    return buildRuntimeConfig(x1436FortyThree, source);
+  }
   if (source[x512Twenty.enabledKey]) {
     return buildRuntimeConfig(x512Twenty, source);
   }

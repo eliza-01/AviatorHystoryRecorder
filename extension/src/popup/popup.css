@@ -701,3 +701,30 @@ button.secondary {
 .strategy-step-table tbody tr:last-child td {
   border-bottom: 0;
 }
+
+
+.strategy-actions-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.strategy-history-period,
+.strategy-history-note {
+  margin: 12px 0 0;
+  color: #d3d8df;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.strategy-history-list {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: #d3d8df;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.strategy-history-list li + li {
+  margin-top: 6px;
+}

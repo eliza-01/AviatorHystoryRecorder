@@ -527,6 +527,52 @@ async function createRuntime({
   assert.strictEqual(x512Twenty.getState().stoppedCycles, 1);
   assert.strictEqual(x512Twenty.recordedCycles.at(-1).pnl, -6.64);
 
+  const x1436 = await createRuntime({
+    strategyId: 'forty-three-plus-x1436',
+    strategyName: '43+ - x14.36',
+    target: 14.36,
+    initialBet: 0.20,
+    signalLength: 43,
+    pauseAt: 41,
+    stopStep: 18,
+    minimumDeposit: 25,
+    startingDeposit: 25,
+    notifyLength: 41
+  });
+  await x1436.snapshot(makeSnapshot(40, 'u', 20.0));
+  assert.strictEqual(x1436.actions.length, 0, '40/43 must not prepare');
+
+  await x1436.snapshot(makeSnapshot(41, 'u', 20.0));
+  assert.deepStrictEqual(x1436.actions.map((item) => item.type), ['PREPARE']);
+  assert.strictEqual(x1436.actions.at(-1).settings.bet, 0.20);
+  assert.strictEqual(x1436.actions.at(-1).settings.cashout, 14.36);
+
+  await x1436.snapshot(makeSnapshot(42, 'u', 20.0));
+  await x1436.snapshot(makeSnapshot(43, 'u', 20.0));
+  assert.strictEqual(x1436.getState().awaitingResult, true);
+  assert.strictEqual(x1436.getState().activeBet, 0.20);
+  assert.strictEqual(
+    x1436.getState().configSignature,
+    'forty-three-plus-x1436|18|0|25|deposit-v2'
+  );
+
+  const x1436Losses = makeSnapshot(43, 'u', 20.0);
+  for (let lossNumber = 1; lossNumber <= 18; lossNumber += 1) {
+    x1436Losses.values.unshift(1.2);
+    x1436Losses.ids.unshift(`u${43 + lossNumber}`);
+    await x1436.snapshot(x1436Losses);
+  }
+  const x1436PlacedBets = x1436.actions
+    .filter((item) => item.type === 'PREPARE_AND_BET')
+    .map((item) => item.settings.bet);
+  assert.deepStrictEqual(x1436PlacedBets, [
+    0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20,
+    0.20, 0.20, 0.20, 0.20, 0.21, 0.23, 0.25, 0.27, 0.29
+  ]);
+  assert.strictEqual(x1436.getState().stoppedCycles, 1);
+  assert.strictEqual(x1436.recordedCycles.at(-1).pnl, -3.85);
+  assert.strictEqual(x1436.getState().minimumDeposit, 25);
+
   const x512Reinvestment = await createRuntime({
     strategyId: 'fifteen-plus-x512',
     strategyName: '15+ - x5.12',

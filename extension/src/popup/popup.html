@@ -208,12 +208,9 @@
         </div>
       </details>
 
-      <details class="strategy-card strategy-card-recommended" id="strategyTwentyPlusX512Card">
+      <details class="strategy-card" id="strategyTwentyPlusX512Card">
         <summary class="strategy-card-summary">
-          <span class="strategy-card-title">
-            20+ - x5.12
-            <span class="strategy-recommended-badge">рекомендуемая</span>
-          </span>
+          <span class="strategy-card-title">20+ - x5.12</span>
           <label class="toggle-control strategy-summary-toggle" title="Включить стратегию">
             <input id="strategyTwentyPlusX512Enabled" type="checkbox">
             <span class="toggle-track" aria-hidden="true"></span>
@@ -300,6 +297,106 @@
             Описание
           </button>
           <small id="strategyStatusX512Twenty">Стратегия выключена</small>
+        </div>
+      </details>
+
+      <details class="strategy-card strategy-card-recommended" id="strategyFortyThreePlusX1436Card">
+        <summary class="strategy-card-summary">
+          <span class="strategy-card-title">
+            43+ - x14.36
+            <span class="strategy-recommended-badge">рекомендуемая</span>
+          </span>
+          <label class="toggle-control strategy-summary-toggle" title="Включить стратегию">
+            <input id="strategyFortyThreePlusX1436Enabled" type="checkbox">
+            <span class="toggle-track" aria-hidden="true"></span>
+          </label>
+        </summary>
+
+        <div class="strategy-card-body">
+          <div class="strategy-summary">
+            <span>Сигнал: 43 результата ≤ 14.36</span>
+            <span>Фиксированный стоп: 18 шагов · исторический минимальный депозит: 25</span>
+          </div>
+
+          <div class="strategy-deposit-apply-row">
+            <label class="field strategy-deposit-field">
+              <span>Стартовый депозит</span>
+              <input
+                id="strategyFortyThreePlusX1436StartingDeposit"
+                type="number"
+                min="25"
+                max="10000000"
+                step="0.01"
+                value="25.00"
+                inputmode="decimal"
+              >
+            </label>
+            <button id="strategyFortyThreePlusX1436ApplyDeposit" type="button">OK</button>
+          </div>
+          <small id="strategyFortyThreePlusX1436DepositNote" class="strategy-stop-details">
+            Минимум 25 — округлённая историческая максимальная просадка 21.2776. Нажмите OK, чтобы применить депозит и пересчитать ставку.
+          </small>
+
+          <div class="strategy-fixed-details">
+            <strong>Расчёт по депозиту</strong>
+            <span id="strategyFortyThreePlusX1436StopDetails"></span>
+          </div>
+
+          <div class="strategy-step-table-wrap">
+            <table class="strategy-step-table">
+              <thead>
+                <tr>
+                  <th>Шаг</th>
+                  <th>Ставка</th>
+                  <th>Минус</th>
+                  <th>Прибыль</th>
+                </tr>
+              </thead>
+              <tbody id="strategyFortyThreePlusX1436Steps"></tbody>
+            </table>
+          </div>
+
+          <div class="strategy-notification-settings">
+            <label class="switch-row notification-switch">
+              <span>Уведомить о серии</span>
+              <span class="toggle-control">
+                <input id="strategyFortyThreePlusX1436NotifySeriesEnabled" type="checkbox" disabled>
+                <span class="toggle-track" aria-hidden="true"></span>
+              </span>
+            </label>
+            <label class="field strategy-series-field">
+              <span>Последовательность результатов ≤ 14.36</span>
+              <input
+                id="strategyFortyThreePlusX1436NotifySeriesLength"
+                type="number"
+                min="1"
+                max="43"
+                step="1"
+                value="41"
+                inputmode="numeric"
+                disabled
+              >
+            </label>
+            <small>Прибыль и достижение стопа отправляются автоматически.</small>
+          </div>
+
+          <div class="strategy-statistics-box">
+            <strong>Статистика</strong>
+            <span id="strategyStatisticsX1436">Нет данных</span>
+            <button id="strategyResetStatisticsX1436" type="button" class="secondary strategy-reset-statistics">
+              Сбросить статистику
+            </button>
+          </div>
+
+          <div class="strategy-actions-row">
+            <button id="strategyFortyThreePlusX1436Description" type="button" class="secondary strategy-description">
+              Описание
+            </button>
+            <button id="strategyFortyThreePlusX1436Historical" type="button" class="secondary strategy-description">
+              Исторические данные
+            </button>
+          </div>
+          <small id="strategyStatusX1436">Стратегия выключена</small>
         </div>
       </details>
     </section>
@@ -496,6 +593,49 @@
       <li>После нажатия OK расширение выбирает максимальную стартовую ставку с шагом 0.01, для которой полный стоп не превышает треть указанного депозита.</li>
       <li>Стартовая ставка не реинвестируется автоматически и меняется только после применения нового стартового депозита.</li>
     </ol>
+  </dialog>
+
+
+  <dialog id="strategyFortyThreePlusX1436DescriptionDialog" class="strategy-dialog">
+    <div class="strategy-dialog-header">
+      <strong>43+ - x14.36</strong>
+      <button id="strategyFortyThreePlusX1436DescriptionClose" type="button" class="secondary">Закрыть</button>
+    </div>
+    <ol>
+      <li>Стратегия ждёт 43 последовательных результата меньше либо равных 14.36.</li>
+      <li>На 41/43 автообновление приостанавливается, а интерфейс заранее готовится.</li>
+      <li>На 43/43 ставка размещается со следующего раунда с фиксированным кэшаутом 14.36.</li>
+      <li>Цикл завершается победой при результате строго выше 14.36 или стопом после проигрыша на 18-м шаге.</li>
+      <li>Каждая следующая ставка покрывает накопленный минус и даёт чистую прибыль не меньше стартовой ставки цикла.</li>
+      <li>Минимальный депозит установлен равным 25 — это округлённая вверх историческая максимальная просадка 21.2776.</li>
+      <li>При депозите 25 стартовая ставка равна 0.20. После нажатия OK ставка масштабируется с шагом 0.01 так, чтобы относительный риск полного стопа не превышал базовый уровень 3.85 / 25.</li>
+      <li>Стартовая ставка меняется только после применения нового депозита кнопкой OK.</li>
+    </ol>
+  </dialog>
+
+  <dialog id="strategyFortyThreePlusX1436HistoricalDialog" class="strategy-dialog">
+    <div class="strategy-dialog-header">
+      <strong>Исторические данные · 43+ - x14.36</strong>
+      <button id="strategyFortyThreePlusX1436HistoricalClose" type="button" class="secondary">Закрыть</button>
+    </div>
+    <p class="strategy-history-period">
+      Период: <strong>25.07.2026 21:17:25.898 — 10.08.2026 23:14:02.864</strong><br>
+      Выборка: <strong>64 444 результата</strong>.
+    </p>
+    <ul class="strategy-history-list">
+      <li>Итоговая прибыль: <strong>+89,1464</strong></li>
+      <li>Максимальная просадка: <strong>21,2776</strong></li>
+      <li>Циклов: <strong>230</strong></li>
+      <li>Реальных стопов: <strong>48</strong></li>
+      <li>Полный стоп при ставке 0,20: <strong>3,85</strong></li>
+      <li>Старая часть: <strong>+56,5008</strong></li>
+      <li>Новые данные: <strong>+32,6456</strong></li>
+      <li>Первая половина новых данных: <strong>+10,8104</strong></li>
+      <li>Вторая половина новых данных: <strong>+21,8352</strong></li>
+      <li>Положительных временных блоков: <strong>8 из 8</strong></li>
+      <li>Худший блок: <strong>+2,8396</strong></li>
+    </ul>
+    <p class="strategy-history-note">Исторические показатели не гарантируют будущий результат.</p>
   </dialog>
 
   <script type="module" src="popup.js"></script>
