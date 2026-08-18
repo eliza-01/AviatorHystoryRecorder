@@ -440,6 +440,17 @@
       <small id="preparationStatus">Подготовка выключена</small>
     </section>
 
+    <section class="fakebet-row" aria-labelledby="fakebet-title">
+      <div class="fakebet-copy">
+        <strong id="fakebet-title">Fakebet</strong>
+        <small>Имитация активности: «Ставка» → отмена через 300 мс. Работает только вне активного цикла и минимум за 2 результата до сигнала.</small>
+      </div>
+      <label class="toggle-control" title="Включить fakebet">
+        <input id="fakeBetEnabled" type="checkbox" aria-label="Fakebet">
+        <span class="toggle-track" aria-hidden="true"></span>
+      </label>
+    </section>
+
     <section class="reload-row" aria-labelledby="reload-title">
       <span id="reload-title" class="reload-title">Автообновление</span>
       <label class="reload-period" for="pageAutoReloadSeconds">

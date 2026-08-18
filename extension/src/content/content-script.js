@@ -19,6 +19,7 @@
   const MAX_BADGE_OPACITY_PERCENT = 100;
   const BADGE_VERTICAL_GAP_PX = 6;
   const BADGE_FALLBACK_HEIGHT_PX = 38;
+  const FAKE_BET_MIN_RELOAD_MS = 10_000;
   const DEFAULT_STRATEGY_TARGET = 3.40;
   const STRATEGY_INITIAL_BET = 0.20;
   const STRATEGY_BET_STEP = 0.01;
@@ -40,6 +41,7 @@
   let pageAutoReloadDurationMs = 0;
   let pageAutoReloadEnabled = false;
   let pageAutoReloadSeconds = 60;
+  let fakeBetEnabled = false;
   let badgeOffsetTopPx = 10;
   let badgeOffsetLeftPx = 10;
   let badgeOpacityPercent = 100;
@@ -57,6 +59,8 @@
   let strategyStopStep = 12;
   let strategyReinvestmentEnabled = false;
   let strategyRuntimeState = null;
+  let fakeBetBadgeHost = null;
+  let fakeBetBadgeText = null;
   let strategyBadgeHost = null;
   let strategyBadgeText = null;
   let strategyBadgeProgress = null;
@@ -88,6 +92,14 @@
     }
 
     window.addEventListener("resize", applyBadgeLayout, { passive: true });
+
+    chrome.runtime?.onMessage?.addListener?.((message, _sender, sendResponse) => {
+      if (message?.type !== "GET_PAGE_AUTO_RELOAD_STATUS") {
+        return false;
+      }
+      sendResponse(getPageAutoReloadStatus());
+      return false;
+    });
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local" || !topPageReady) {
@@ -139,6 +151,7 @@
       100
     );
     activeStrategyConfig = response?.activeStrategy || null;
+    fakeBetEnabled = Boolean(response?.fakeBetEnabled);
     strategyStopStep = Math.max(
       0,
       Number(activeStrategyConfig?.stopStep || response?.strategyTenPlusX340StopStep || 0)
@@ -155,6 +168,7 @@
     const opacity = (badgeOpacityPercent / 100).toFixed(2);
     const hosts = [
       pageAutoReloadBadgeHost,
+      fakeBetBadgeHost,
       strategyBadgeHost,
       balanceBadgeHost
     ].filter((host) => Boolean(host?.isConnected));
@@ -189,6 +203,7 @@
       });
 
       if (!response?.ok || !response.aviatorTab) {
+        removeFakeBetBadge();
         removeStrategyBadge();
         removeBalanceBadge();
         return;
@@ -203,6 +218,7 @@
       );
 
       updateStrategyBadge();
+      updateFakeBetBadge();
       updatePageAutoReloadBadge();
 
       if (previousSuspended !== pageAutoReloadSuspendedByStrategy) {
@@ -226,6 +242,7 @@
 
       if (!response?.ok || !response.aviatorTab) {
         removePageAutoReloadBadge();
+        removeFakeBetBadge();
         removeStrategyBadge();
         removeBalanceBadge();
         return;
@@ -248,6 +265,7 @@
 
       ensurePageAutoReloadBadge();
       updateStrategyBadge();
+      updateFakeBetBadge();
 
       if (!pageAutoReloadEnabled || pageAutoReloadSuspendedByStrategy) {
         updatePageAutoReloadBadge();
@@ -484,6 +502,7 @@
   }
 
   function updatePageAutoReloadBadge() {
+    updateFakeBetBadge();
     if (
       !pageAutoReloadBadgeButton ||
       !pageAutoReloadBadgeText ||
@@ -593,6 +612,147 @@
         updatePageAutoReloadBadge();
       }, 2500);
     }
+  }
+
+  function getPageAutoReloadStatus() {
+    const suspended = Boolean(pageAutoReloadSuspendedByStrategy);
+    const enabled = Boolean(pageAutoReloadEnabled);
+    const remainingMs = pageAutoReloadDeadline
+      ? Math.max(0, pageAutoReloadDeadline - Date.now())
+      : enabled && !suspended
+        ? null
+        : null;
+    const safeForFakeBet = Boolean(
+      !enabled ||
+      suspended ||
+      (Number.isFinite(remainingMs) && remainingMs >= FAKE_BET_MIN_RELOAD_MS)
+    );
+
+    return {
+      ok: true,
+      enabled,
+      suspended,
+      remainingMs,
+      safeForFakeBet
+    };
+  }
+
+  function updateFakeBetBadge() {
+    if (!fakeBetEnabled) {
+      removeFakeBetBadge();
+      return;
+    }
+
+    ensureFakeBetBadge();
+    if (!fakeBetBadgeText) {
+      return;
+    }
+
+    const state = strategyRuntimeState || {};
+    const signalLength = Math.max(1, Number(activeStrategyConfig?.signalLength || 0));
+    const streak = Math.max(0, Number(state.consecutiveLosses || 0));
+    const stage = String(state.stage || "waiting");
+    const activeCycle = Boolean(
+      state.awaitingResult ||
+      Number(state.activeBet || 0) > 0 ||
+      Number(state.step || 0) > 0 ||
+      Number(state.cumulativeLoss || 0) > 0 ||
+      ["preparing", "arming", "betting", "waiting-reset", "error"].includes(stage)
+    );
+
+    if (!strategyEnabled || !activeStrategyConfig) {
+      fakeBetBadgeText.textContent = "🎭 Fakebet · нет активной стратегии";
+    } else if (activeCycle) {
+      fakeBetBadgeText.textContent = state.awaitingResult || Number(state.step || 0) > 0
+        ? "🎭 Fakebet · пауза: идёт ставка"
+        : `🎭 Fakebet · пауза: ${stage}`;
+    } else if (signalLength - streak < 2) {
+      fakeBetBadgeText.textContent =
+        `🎭 Fakebet · пауза: серия ${Math.min(streak, signalLength)}/${signalLength}`;
+    } else {
+      const reload = getPageAutoReloadStatus();
+      if (!reload.safeForFakeBet) {
+        const seconds = Number.isFinite(reload.remainingMs)
+          ? Math.max(0, Math.ceil(reload.remainingMs / 1000))
+          : "?";
+        fakeBetBadgeText.textContent =
+          `🎭 Fakebet · пауза: обновление через ${seconds} сек`;
+      } else {
+        fakeBetBadgeText.textContent =
+          `🎭 Fakebet · готов · серия ${Math.min(streak, signalLength)}/${signalLength}`;
+      }
+    }
+    applyBadgeLayout();
+  }
+
+  function ensureFakeBetBadge() {
+    if (fakeBetBadgeHost?.isConnected) {
+      return;
+    }
+
+    const host = document.createElement("div");
+    host.id = "aviator-extension-fakebet-badge";
+    host.style.cssText = [
+      "position:fixed",
+      "top:56px",
+      "left:10px",
+      "transform:none",
+      "z-index:2147483646",
+      "display:block",
+      "max-width:calc(100vw - 20px)",
+      "pointer-events:none"
+    ].join(";");
+
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = `
+      .badge {
+        box-sizing: border-box;
+        width: max-content;
+        min-width: 250px;
+        max-width: var(--aviator-badge-max-width, calc(100vw - 20px));
+        overflow: hidden;
+        padding: 8px 14px;
+        border: 1px solid rgba(191, 126, 255, 0.82);
+        border-radius: 999px;
+        background: rgba(20, 23, 28, 0.94);
+        box-shadow: 0 5px 18px rgba(0, 0, 0, 0.32);
+        color: #ffffff;
+        font: 600 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: center;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      .text {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      @media (max-width: 360px) {
+        .badge { min-width: 0; width: var(--aviator-badge-max-width, calc(100vw - 20px)); }
+      }
+    `;
+
+    const badge = document.createElement("div");
+    badge.className = "badge";
+    badge.setAttribute("aria-live", "polite");
+    const text = document.createElement("span");
+    text.className = "text";
+    badge.append(text);
+    shadow.append(style, badge);
+
+    fakeBetBadgeHost = host;
+    fakeBetBadgeText = text;
+    (document.documentElement || document).append(host);
+    applyBadgeLayout();
+  }
+
+  function removeFakeBetBadge() {
+    fakeBetBadgeHost?.remove();
+    fakeBetBadgeHost = null;
+    fakeBetBadgeText = null;
   }
 
   function updateStrategyBadge() {

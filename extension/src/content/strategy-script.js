@@ -20,6 +20,7 @@
   const BET_STEP = 0.01;
   const BRIDGE_TIMEOUT_MS = 8_000;
   const ACTION_TIMEOUT_MS = 80_000;
+  const FAKE_BET_MIN_RELOAD_MS = 10_000;
 
   if (!GAME_HOST_PATTERN.test(location.hostname)) {
     return;
@@ -500,7 +501,8 @@
       state.message = `Ожидание сигнала: 0/${strategySignalLength()}`;
       signalInterfacePrepared = false;
       await persistState();
-      return true;
+      await maybeRunFakeBet(hasFollowingRound);
+      return state.stage !== "error";
     }
 
     state.consecutiveLosses += 1;
@@ -534,6 +536,10 @@
     }
 
     await persistState();
+    await maybeRunFakeBet(hasFollowingRound);
+    if (state.stage === "error") {
+      return false;
+    }
     if (
       !hasFollowingRound &&
       state.consecutiveLosses >= strategyPauseAt()
@@ -541,6 +547,59 @@
       await ensureSignalInterfacePrepared();
     }
     return true;
+  }
+
+  async function maybeRunFakeBet(hasFollowingRound) {
+    if (
+      !settings?.fakeBetEnabled ||
+      hasFollowingRound ||
+      !state ||
+      state.stage !== "waiting" ||
+      state.awaitingResult ||
+      Number(state.activeBet || 0) > 0 ||
+      Number(state.step || 0) > 0 ||
+      Number(state.cumulativeLoss || 0) > 0 ||
+      strategySignalLength() - Number(state.consecutiveLosses || 0) < 2
+    ) {
+      return false;
+    }
+
+    if (!state.autoReloadPaused) {
+      let reloadWindow = null;
+      try {
+        reloadWindow = await chrome.runtime.sendMessage({
+          type: "GET_FAKEBET_RELOAD_WINDOW",
+          pageUrl: location.href,
+          frameUrl: location.href
+        });
+      } catch {
+        return false;
+      }
+
+      if (!reloadWindow?.ok || !reloadWindow.safe) {
+        return false;
+      }
+      if (
+        reloadWindow.enabled &&
+        !reloadWindow.suspended &&
+        (!Number.isFinite(Number(reloadWindow.remainingMs)) ||
+          Number(reloadWindow.remainingMs) < FAKE_BET_MIN_RELOAD_MS)
+      ) {
+        return false;
+      }
+    }
+
+    try {
+      const result = await requestInterfaceAction("FAKE_BET", strategyInitialBet());
+      return Boolean(result?.performed);
+    } catch (error) {
+      state.stage = "error";
+      state.error = `Fakebet: ${error instanceof Error ? error.message : String(error)}`;
+      state.message = "Fakebet не подтвердил отмену. Стратегия остановлена для проверки";
+      state.autoReloadPaused = true;
+      await persistState();
+      return false;
+    }
   }
 
   function beginBettingCycle() {
@@ -860,7 +919,11 @@
     await verifyControllerOwnership();
 
     const requestId = createRequestId(
-      type === "PREPARE" ? "strategy-prepare" : "strategy-bet"
+      type === "PREPARE"
+        ? "strategy-prepare"
+        : type === "FAKE_BET"
+          ? "strategy-fakebet"
+          : "strategy-bet"
     );
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -871,7 +934,9 @@
           new Error(
             type === "PREPARE"
               ? "Предварительная подготовка интерфейса превысила лимит времени"
-              : "Подготовка и размещение ставки превысили лимит времени"
+              : type === "FAKE_BET"
+                ? "Fakebet превысил лимит времени"
+                : "Подготовка и размещение ставки превысили лимит времени"
           )
         );
       }, ACTION_TIMEOUT_MS);
@@ -888,7 +953,7 @@
             reject(new Error(result.error || "Интерфейс не выполнил действие"));
             return;
           }
-          resolve();
+          resolve(result);
         },
         reject: (error) => {
           clearTimeout(timeout);
@@ -1265,6 +1330,7 @@
         minimumDeposit: 0,
         startingDeposit: 0,
         reinvestmentEnabled: false,
+        fakeBetEnabled: Boolean(response?.fakeBetEnabled),
         telegramConfigured: Boolean(response?.telegramConfigured),
         notifySeriesEnabled: false,
         notifySeriesLength: DEFAULT_AUTO_RELOAD_PAUSE_AT
@@ -1294,6 +1360,7 @@
       minimumDeposit,
       startingDeposit,
       reinvestmentEnabled: Boolean(source.reinvestmentEnabled),
+      fakeBetEnabled: Boolean(response.fakeBetEnabled),
       telegramConfigured: Boolean(response.telegramConfigured),
       notifySeriesEnabled: Boolean(source.notifySeriesEnabled),
       notifySeriesLength: Math.min(

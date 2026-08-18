@@ -42,15 +42,18 @@ const { saveSettings, getSettings } = await import(
 const saved = await saveSettings({
   badgeOffsetTopPx: 41.8,
   badgeOffsetLeftPx: -5,
-  badgeOpacityPercent: 72.6
+  badgeOpacityPercent: 72.6,
+  fakeBetEnabled: true
 });
 assert.equal(saved.badgeOffsetTopPx, 42);
 assert.equal(saved.badgeOffsetLeftPx, 0);
 assert.equal(saved.badgeOpacityPercent, 73);
+assert.equal(saved.fakeBetEnabled, true);
 const loaded = await getSettings();
 assert.equal(loaded.badgeOffsetTopPx, 42);
 assert.equal(loaded.badgeOffsetLeftPx, 0);
 assert.equal(loaded.badgeOpacityPercent, 73);
+assert.equal(loaded.fakeBetEnabled, true);
 
 
 const strategySaved = await saveSettings({

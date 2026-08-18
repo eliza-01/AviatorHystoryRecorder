@@ -194,6 +194,7 @@ function sanitizeSettings(value) {
   settings.enabled = Boolean(settings.enabled);
   settings.diagnosticsEnabled = Boolean(settings.diagnosticsEnabled);
   settings.pageAutoReloadEnabled = Boolean(settings.pageAutoReloadEnabled);
+  settings.fakeBetEnabled = Boolean(settings.fakeBetEnabled);
   settings.pageAutoReloadSeconds = normalizeAutoReloadSeconds(
     settings.pageAutoReloadSeconds
   );

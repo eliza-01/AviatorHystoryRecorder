@@ -4,6 +4,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   apiBaseUrl: "http://localhost:8010",
   pageAutoReloadEnabled: false,
   pageAutoReloadSeconds: 60,
+  fakeBetEnabled: false,
   badgeOffsetTopPx: 10,
   badgeOffsetLeftPx: 10,
   badgeOpacityPercent: 100,

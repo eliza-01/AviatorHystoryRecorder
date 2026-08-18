@@ -50,7 +50,7 @@
       return;
     }
 
-    if (!["PREPARE", "PREPARE_AND_BET"].includes(message.type)) {
+    if (!["PREPARE", "PREPARE_AND_BET", "FAKE_BET"].includes(message.type)) {
       return;
     }
 
@@ -75,12 +75,108 @@
       cashout: normalizePositiveNumber(message.settings?.cashout, 2)
     };
 
+    if (message.type === "FAKE_BET") {
+      void runFakeBet(run, requestId);
+      return;
+    }
+
     void runPreparation(
       run,
       requestId,
       settings,
       message.type === "PREPARE_AND_BET"
     );
+  }
+
+  async function runFakeBet(run, requestId) {
+    let firstClickPerformed = false;
+    try {
+      const initial = await waitFor(() => {
+        const current = findBetButtonState();
+        return current?.ready ? current : null;
+      }, 1_200, run).catch(() => null);
+
+      if (!initial?.button) {
+        postMessageToController("PREPARE_RESULT", requestId, {
+          ok: true,
+          performed: false,
+          skipped: true,
+          reason: "bet-button-not-ready"
+        }, run.source);
+        completeControllerRun(run);
+        return;
+      }
+
+      ensureActiveRun(run);
+      performClick(initial.button);
+      firstClickPerformed = true;
+      await delay(300, run);
+
+      const afterFirstClick = findBetButtonState();
+      if (afterFirstClick?.ready) {
+        postMessageToController("PREPARE_RESULT", requestId, {
+          ok: true,
+          performed: false,
+          skipped: true,
+          reason: "bet-was-not-accepted"
+        }, run.source);
+        completeControllerRun(run);
+        return;
+      }
+
+      const cancelState = await waitFor(() => {
+        const current = findBetButtonState();
+        if (!current || current.disabled) {
+          return null;
+        }
+        if (current.ready) {
+          return { mode: "ready", state: current };
+        }
+        if (isCancelBetLabel(current.label)) {
+          return { mode: "cancel", state: current };
+        }
+        return null;
+      }, 1_200, run).catch(() => null);
+
+      if (cancelState?.mode === "ready") {
+        postMessageToController("PREPARE_RESULT", requestId, {
+          ok: true,
+          performed: false,
+          skipped: true,
+          reason: "bet-returned-to-ready"
+        }, run.source);
+        completeControllerRun(run);
+        return;
+      }
+      if (cancelState?.mode !== "cancel" || !cancelState.state?.button) {
+        throw new Error("после первого клика не появилась подтверждённая кнопка отмены");
+      }
+
+      performClick(cancelState.state.button);
+      await waitFor(() => {
+        const current = findBetButtonState();
+        return current?.ready ? current : null;
+      }, ACTION_RETRY_TIMEOUT_MS, run);
+
+      postMessageToController("PREPARE_RESULT", requestId, {
+        ok: true,
+        performed: true,
+        cancelled: true,
+        delayMs: 300
+      }, run.source);
+      completeControllerRun(run);
+    } catch (error) {
+      if (error?.name === "PreparationCancelledError") {
+        return;
+      }
+      postMessageToController("PREPARE_RESULT", requestId, {
+        ok: false,
+        performed: firstClickPerformed,
+        stage: "error",
+        error: error instanceof Error ? error.message : String(error)
+      }, run.source);
+      completeControllerRun(run);
+    }
   }
 
   async function runPreparation(run, requestId, settings, placeBetAfterPreparation) {
@@ -411,8 +507,14 @@
 
     return {
       button,
+      label,
+      disabled,
       ready: !disabled && /^ставка$/i.test(label)
     };
+  }
+
+  function isCancelBetLabel(value) {
+    return /отмен|cancel/i.test(normalizeText(value));
   }
 
   async function writeInputValue(input, text, run, forceScriptedTyping) {

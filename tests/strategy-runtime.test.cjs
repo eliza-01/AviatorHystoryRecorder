@@ -39,7 +39,10 @@ async function createRuntime({
   signalLength = 10,
   pauseAt = 8,
   minimumDeposit = null,
-  startingDeposit = null
+  startingDeposit = null,
+  fakeBetEnabled = false,
+  fakeBetReloadSafe = true,
+  fakeBetRemainingMs = 20_000
 } = {}) {
   const listeners = new Map();
   const storageChangeListeners = [];
@@ -62,7 +65,10 @@ async function createRuntime({
     signalLength,
     pauseAt,
     minimumDeposit,
-    startingDeposit
+    startingDeposit,
+    fakeBetEnabled,
+    fakeBetReloadSafe,
+    fakeBetRemainingMs
   };
 
   const window = {
@@ -90,7 +96,7 @@ async function createRuntime({
         return;
       }
       if (message.type === 'CANCEL') return;
-      if (message.type === 'PREPARE' || message.type === 'PREPARE_AND_BET') {
+      if (message.type === 'PREPARE' || message.type === 'PREPARE_AND_BET' || message.type === 'FAKE_BET') {
         actions.push({ type: message.type, settings: message.settings });
         queueMicrotask(() => emit('message', {
           source: window,
@@ -100,7 +106,8 @@ async function createRuntime({
             controllerSource: 'aviator-strategy-controller',
             type: 'PREPARE_RESULT',
             requestId: message.requestId,
-            ok: true
+            ok: true,
+            performed: message.type === 'FAKE_BET'
           }
         }));
       }
@@ -126,6 +133,7 @@ async function createRuntime({
             return {
               ok: true,
               telegramConfigured: runtimeSettings.telegramConfigured,
+              fakeBetEnabled: runtimeSettings.fakeBetEnabled,
               activeStrategy: runtimeSettings.enabled
                 ? {
                     id: runtimeSettings.strategyId,
@@ -143,6 +151,14 @@ async function createRuntime({
                   }
                 : null,
               strategyState: savedState
+            };
+          case 'GET_FAKEBET_RELOAD_WINDOW':
+            return {
+              ok: true,
+              enabled: true,
+              suspended: false,
+              remainingMs: runtimeSettings.fakeBetRemainingMs,
+              safe: runtimeSettings.fakeBetReloadSafe
             };
           case 'CLAIM_STRATEGY_CONTROLLER':
             return owner
@@ -600,6 +616,61 @@ async function createRuntime({
   });
   await x512Reinvestment.snapshot(makeSnapshot(13, 'qr', 6.0));
   assert.strictEqual(x512Reinvestment.actions.at(-1).settings.bet, 0.21);
+
+  const fakeBetSafe = await createRuntime({
+    strategyId: 'twenty-plus-x512',
+    strategyName: '20+ - x5.12',
+    target: 5.12,
+    initialBet: 0.20,
+    signalLength: 20,
+    pauseAt: 18,
+    stopStep: 11,
+    minimumDeposit: 13.41,
+    startingDeposit: 13.41,
+    notifyLength: 18,
+    fakeBetEnabled: true,
+    fakeBetReloadSafe: true,
+    fakeBetRemainingMs: 20_000
+  });
+  await fakeBetSafe.snapshot(makeSnapshot(16, 'fb', 6.0));
+  await fakeBetSafe.snapshot(makeSnapshot(17, 'fb', 6.0));
+  assert.deepStrictEqual(
+    fakeBetSafe.actions.map((item) => item.type),
+    ['FAKE_BET'],
+    'fakebet must run after a new result while at least 2 losses remain and reload is >=10s away'
+  );
+  await fakeBetSafe.snapshot(makeSnapshot(18, 'fb', 6.0));
+  assert.deepStrictEqual(
+    fakeBetSafe.actions.map((item) => item.type),
+    ['FAKE_BET', 'FAKE_BET', 'PREPARE'],
+    '18/20 is allowed because strategy has paused auto reload; then regular preparation starts'
+  );
+  await fakeBetSafe.snapshot(makeSnapshot(19, 'fb', 6.0));
+  assert.deepStrictEqual(
+    fakeBetSafe.actions.map((item) => item.type),
+    ['FAKE_BET', 'FAKE_BET', 'PREPARE'],
+    '19/20 must not fakebet because only one loss remains before the real signal'
+  );
+
+  const fakeBetNearReload = await createRuntime({
+    strategyId: 'twenty-plus-x512',
+    strategyName: '20+ - x5.12',
+    target: 5.12,
+    initialBet: 0.20,
+    signalLength: 20,
+    pauseAt: 18,
+    stopStep: 11,
+    minimumDeposit: 13.41,
+    startingDeposit: 13.41,
+    notifyLength: 18,
+    fakeBetEnabled: true,
+    fakeBetReloadSafe: false,
+    fakeBetRemainingMs: 9_000
+  });
+  await fakeBetNearReload.snapshot(makeSnapshot(16, 'fbr', 6.0));
+  await fakeBetNearReload.snapshot(makeSnapshot(17, 'fbr', 6.0));
+  assert.strictEqual(fakeBetNearReload.actions.length, 0,
+    'fakebet must not run when active auto reload is less than 10 seconds away');
 
   const nonOwner = await createRuntime({ owner: false });
   await nonOwner.snapshot(makeSnapshot(10, 'z'));

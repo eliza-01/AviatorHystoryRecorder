@@ -122,6 +122,9 @@ async function handleMessage(message, sender) {
     case "GET_CAPTURE_STATE":
       return getCaptureState(sender, message);
 
+    case "GET_FAKEBET_RELOAD_WINDOW":
+      return getFakeBetReloadWindow(sender);
+
     case "CAPTURE_RESULTS":
       return captureResults(sender, message);
 
@@ -208,6 +211,7 @@ async function getCaptureState(sender, message) {
       settings.pageAutoReloadEnabled && aviatorTab
     ),
     pageAutoReloadSeconds: Number(settings.pageAutoReloadSeconds),
+    fakeBetEnabled: Boolean(settings.fakeBetEnabled && aviatorTab),
     badgeOffsetTopPx: Number(settings.badgeOffsetTopPx),
     badgeOffsetLeftPx: Number(settings.badgeOffsetLeftPx),
     badgeOpacityPercent: Number(settings.badgeOpacityPercent),
@@ -263,6 +267,44 @@ async function getCaptureState(sender, message) {
     strategyState,
     strategyStatistics
   };
+}
+
+async function getFakeBetReloadWindow(sender) {
+  const tabId = sender.tab?.id;
+  if (tabId === null || tabId === undefined) {
+    return { ok: false, safe: false, error: "Не определена вкладка Aviator" };
+  }
+
+  try {
+    const status = await chrome.tabs.sendMessage(
+      tabId,
+      { type: "GET_PAGE_AUTO_RELOAD_STATUS" },
+      { frameId: 0 }
+    );
+    if (!status?.ok) {
+      return {
+        ok: false,
+        safe: false,
+        error: status?.error || "Не удалось получить таймер автообновления"
+      };
+    }
+
+    return {
+      ok: true,
+      enabled: Boolean(status.enabled),
+      suspended: Boolean(status.suspended),
+      remainingMs: Number.isFinite(Number(status.remainingMs))
+        ? Math.max(0, Number(status.remainingMs))
+        : null,
+      safe: Boolean(status.safeForFakeBet)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      safe: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 async function captureResults(sender, message) {

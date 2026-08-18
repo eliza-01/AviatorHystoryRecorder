@@ -154,6 +154,7 @@ const elements = {
   preparationBet: document.querySelector("#preparationBet"),
   preparationCashout: document.querySelector("#preparationCashout"),
   preparationStatus: document.querySelector("#preparationStatus"),
+  fakeBetEnabled: document.querySelector("#fakeBetEnabled"),
   pageAutoReloadEnabled: document.querySelector("#pageAutoReloadEnabled"),
   pageAutoReloadSeconds: document.querySelector("#pageAutoReloadSeconds"),
   badgeOffsetTopPx: document.querySelector("#badgeOffsetTopPx"),
@@ -269,6 +270,7 @@ const settingsElements = [
   elements.preparationEnabled,
   elements.preparationBet,
   elements.preparationCashout,
+  elements.fakeBetEnabled,
   elements.pageAutoReloadEnabled,
   elements.pageAutoReloadSeconds
 ];
@@ -582,6 +584,7 @@ function render(response) {
     elements.preparationEnabled.checked = Boolean(settings.preparationEnabled);
     elements.preparationBet.value = String(settings.preparationBet ?? 1);
     elements.preparationCashout.value = String(settings.preparationCashout ?? 2);
+    elements.fakeBetEnabled.checked = Boolean(settings.fakeBetEnabled);
     elements.pageAutoReloadEnabled.checked = Boolean(
       settings.pageAutoReloadEnabled
     );
@@ -1266,6 +1269,7 @@ async function save() {
           : elements.preparationEnabled.checked,
       preparationBet,
       preparationCashout,
+      fakeBetEnabled: elements.fakeBetEnabled.checked,
       pageAutoReloadEnabled: elements.pageAutoReloadEnabled.checked,
       pageAutoReloadSeconds: reloadSeconds,
       badgeOffsetTopPx,
